@@ -43,8 +43,9 @@ function normalizeItem(item: Record<string, unknown>, businessType: BusinessType
 }
 
 export class NarajangteoBidSource implements BidSource {
+  constructor(private readonly configuredKey = process.env.NARAJANGTEO_SERVICE_KEY) {}
   async listNotices(windowStart: Date, windowEnd: Date): Promise<BidNotice[]> {
-    const serviceKey = process.env.NARAJANGTEO_SERVICE_KEY;
+    const serviceKey = this.configuredKey;
     if (!serviceKey) throw new Error("NARAJANGTEO_SERVICE_KEY가 설정되지 않았습니다.");
     const notices: BidNotice[] = [];
     for (const [businessType, endpoint] of LIST_ENDPOINTS) for (let pageNo = 1; pageNo <= MAX_PAGES_PER_TYPE; pageNo += 1) {

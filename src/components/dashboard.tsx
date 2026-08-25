@@ -85,6 +85,7 @@ export function Dashboard({ initialNotices, initialTopic, initialNotifications, 
           <NavItem active={tab === "notices"} icon={<FileText size={18} />} label="전체 공고" onClick={() => setTab("notices")} />
           {isAdmin && <NavItem active={tab === "topic"} icon={<SlidersHorizontal size={18} />} label="관리자 설정" onClick={() => setTab("topic")} />}
           <NavItem active={tab === "notifications"} icon={<Bell size={18} />} label="알림 센터" badge={unread || undefined} onClick={() => setTab("notifications")} />
+          <NavItem active={false} icon={<Settings2 size={18} />} label="관리자 페이지" onClick={() => { window.location.href = "/admin"; }} />
           {isAdmin && <NavItem active={tab === "operations"} icon={<Settings2 size={18} />} label="운영 현황" onClick={() => setTab("operations")} />}
         </nav>
         <div className="sidebar-bottom"><div className="profile-avatar">{isAdmin ? "관" : "사"}</div><div><strong>{userEmail}</strong><small>{isAdmin ? "관리자" : "열람 사용자"}</small></div></div>

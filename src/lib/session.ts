@@ -1,10 +1,6 @@
-import { requireUser } from "@/lib/auth";
-import { SupabaseRepository } from "@/lib/repository";
-import { createSupabaseAdminClient } from "@/lib/supabase";
+import { hasAdminSession } from "@/lib/admin-session";
+import { PublicRepository } from "@/lib/repository";
 
 export async function currentRepository() {
-  const user = await requireUser();
-  const { data } = await createSupabaseAdminClient().from("allowed_users").select("role, active").eq("email", user.email?.toLowerCase() ?? "").maybeSingle();
-  if (!data?.active) throw new Error("허용되지 않은 사용자입니다.");
-  return { user, isAdmin: data.role === "admin", repository: new SupabaseRepository(user.id) };
+  return { user: null, isAdmin: await hasAdminSession(), repository: new PublicRepository() };
 }
