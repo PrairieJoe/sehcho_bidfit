@@ -43,6 +43,7 @@ pnpm build
 |---|---|
 | `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase 인증·DB 연결 |
 | `SUPABASE_SERVICE_ROLE_KEY` | 서버측 관리 작업 |
+| `ADMIN_ACCESS_CODE` | 관리자 페이지 접근 코드(서버 환경변수 전용) |
 | `NARAJANGTEO_SERVICE_KEY` | 나라장터 OpenAPI 호출 |
 | `NEXT_PUBLIC_SITE_URL` | 매직링크가 돌아올 배포 URL |
 | `CRON_SECRET` | Vercel Cron 호출 검증용 비밀값 |
