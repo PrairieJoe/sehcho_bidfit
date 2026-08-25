@@ -5,7 +5,9 @@ import { cookies } from "next/headers";
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-export const isSupabaseConfigured = () => Boolean(url && anonKey && process.env.SUPABASE_SERVICE_ROLE_KEY);
+// Public pages use the server-side service client. The anon key is retained
+// for optional Supabase browser integrations but is not required for this app.
+export const isSupabaseConfigured = () => Boolean(url && process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 function requiredConfig() {
   if (!url || !anonKey) throw new Error("Supabase 환경변수가 설정되지 않았습니다.");
