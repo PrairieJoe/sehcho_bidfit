@@ -36,4 +36,8 @@ nav { display:grid; gap:4px; }.nav-item { color:#a9b5c7; background:transparent;
 .admin-settings form label:first-child,.admin-settings form label:nth-child(2),.admin-settings form label:nth-child(3),.admin-settings form button { grid-column:1 / -1; }
 .admin-settings>a { display:inline-block; margin-top:20px; color:var(--blue); font-size:13px; text-decoration:none; }
 .admin-settings>a:hover { text-decoration:underline; }
+.config-status { display:grid; gap:4px; margin:0 0 18px; padding:12px 13px; border-radius:8px; font-size:12px; line-height:1.5; }
+.config-status span { color:var(--muted); }
+.config-status.ready { background:#edf9f3; border:1px solid #ccebd9; color:#14734f; }
+.config-status.warning { background:#fff5e5; border:1px solid #f3dfb8; color:#9a5d08; }
 @media (max-width:600px) { .login-card { padding:25px 20px; }.admin-settings form { grid-template-columns:1fr; }.admin-settings form label,.admin-settings form button { grid-column:auto; } }
