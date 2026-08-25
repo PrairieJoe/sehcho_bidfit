@@ -1,12 +1,12 @@
-import { repository } from "@/lib/store";
+import { currentRepository } from "@/lib/session";
+import { requireAdmin } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return Response.json(repository.listRuns());
+  try { return Response.json(await (await currentRepository()).repository.listRuns()); } catch { return Response.json({ message: "인증이 필요합니다." }, { status: 401 }); }
 }
 
 export async function POST() {
-  const run = await repository.runDailyAnalysis();
-  return Response.json(run, { status: 201 });
+  try { await requireAdmin(); const run = await (await currentRepository()).repository.runDailyAnalysis(); return Response.json(run, { status: 201 }); } catch { return Response.json({ message: "관리자 권한이 없거나 실행에 실패했습니다." }, { status: 403 }); }
 }

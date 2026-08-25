@@ -23,8 +23,12 @@ export interface Attachment {
   id: string;
   name: string;
   kind: string;
-  status: "분석 완료" | "부분 분석" | "추출 실패" | "다운로드 실패";
+  status: "대기" | "처리 중" | "보류" | "분석 완료" | "부분 분석" | "추출 실패" | "다운로드 실패";
   pages?: number;
+  sourceUrl?: string;
+  storagePath?: string;
+  extractedText?: string;
+  failureReason?: string;
 }
 
 export interface Evidence {

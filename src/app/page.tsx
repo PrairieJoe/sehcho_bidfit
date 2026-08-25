@@ -1,8 +1,9 @@
 import { Dashboard } from "@/components/dashboard";
-import { repository } from "@/lib/store";
+import { currentRepository } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
-export default function Home() {
-  return <Dashboard initialNotices={repository.listNotices()} initialTopic={repository.getTopic()} initialNotifications={repository.listNotifications()} initialRuns={repository.listRuns()} />;
+export default async function Home() {
+  const { repository, user, isAdmin } = await currentRepository();
+  return <Dashboard initialNotices={await repository.listNotices()} initialTopic={await repository.getTopic()} initialNotifications={await repository.listNotifications()} initialRuns={await repository.listRuns()} userEmail={user.email ?? "사용자"} isAdmin={isAdmin} />;
 }

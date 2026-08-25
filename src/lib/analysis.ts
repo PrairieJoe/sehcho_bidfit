@@ -4,20 +4,20 @@ const normalize = (value: string) => value.toLowerCase().replace(/\s/g, "");
 const toCurrency = (value: number | null) => value ? `${Math.round(value / 10_000).toLocaleString("ko-KR")}만원` : "금액 미정";
 
 function directEvidence(notice: BidNotice, keyword: string): Evidence | undefined {
-  const source = `${notice.title} ${notice.description} ${notice.tasks.join(" ")}`;
+  const source = `${notice.title} ${notice.description} ${notice.tasks.join(" ")} ${notice.attachments.map((item) => item.name + " " + (item.extractedText ?? "")).join(" ")}`;
   if (!normalize(source).includes(normalize(keyword))) return undefined;
   const attachment = notice.attachments.find((item) => item.status === "분석 완료") ?? notice.attachments[0];
   return {
     label: "핵심 주제 일치",
     text: `“${keyword}” 관련 과업이 공고의 목적 또는 수행 범위에 포함됩니다.`,
     source: attachment?.name ?? "입찰공고 기본정보",
-    location: attachment?.pages ? "p. 1~3" : "공고 요약",
+    location: attachment?.extractedText && normalize(attachment.extractedText).includes(normalize(keyword)) ? "추출 텍스트" : attachment?.pages ? "p. 1~3" : "공고 요약",
   };
 }
 
 export class RuleAnalysisEngine implements AnalysisEngine {
   analyze(notice: BidNotice, topic: Topic): AnalysisResult {
-    const corpus = normalize([notice.title, notice.description, notice.tasks.join(" "), notice.qualifications.join(" ")].join(" "));
+    const corpus = normalize([notice.title, notice.description, notice.tasks.join(" "), notice.qualifications.join(" "), ...notice.attachments.map((item) => `${item.name} ${item.extractedText ?? ""}`)].join(" "));
     const keywordMatches = topic.includeKeywords.filter((keyword) => corpus.includes(normalize(keyword)));
     const excluded = topic.excludeKeywords.filter((keyword) => corpus.includes(normalize(keyword)));
     const typeMatch = topic.businessTypes.includes(notice.businessType);
