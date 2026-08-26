@@ -24,7 +24,9 @@ export function Dashboard({ initialNotices, initialTopic, initialNotifications, 
   const [selected, setSelected] = useState<BidNotice | null>(null);
   const [running, setRunning] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
-  const visibleNotices = isAdmin ? notices : notices.filter((notice) => notice.analysis);
+  // 수집 원본은 운영 지표에만 사용한다. 관리자도 결과 화면에서는
+  // 첨부 근거까지 확보되어 분석이 완료된 공고만 확인한다.
+  const visibleNotices = notices.filter((notice) => notice.analysis);
   const candidatePendingCount = notices.filter((notice) => !notice.analysis && isTitleCandidate(notice, topic)).length;
 
   const filtered = useMemo(() => visibleNotices
