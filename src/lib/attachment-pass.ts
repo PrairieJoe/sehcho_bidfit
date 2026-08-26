@@ -3,25 +3,25 @@ import { createSupabaseAdminClient } from "@/lib/supabase";
 import type { Attachment } from "@/lib/types";
 
 type Row = Record<string, any>;
-const normalize = (value: string) => value.toLowerCase().replace(/\s/g, "");
-const MAX_PER_BATCH = 3;
+// Vercel Hobby의 5분 함수 한도보다 여유를 둔다. 시간 안에 처리하지 못한
+// 파일은 처리 작업으로 남아 다음 정기 실행에서 이어서 처리한다.
+const PROCESSING_BUDGET_MS = 250_000;
+const MAX_QUEUE_SCAN = 500;
 
-/** Processes a small, title-matched attachment queue within the Vercel Hobby budget. */
+/**
+ * Processes attachments sequentially. A notice title is never used to exclude its
+ * documents: the business substance is determined from extracted document text.
+ */
 export async function runAttachmentPass(noticeIds?: string[]) {
   const admin = createSupabaseAdminClient();
-  const { data: topics, error: topicError } = await admin.from("topics").select("include_keywords").limit(10);
-  if (topicError) throw topicError;
-  const keywords = [...new Set((topics ?? []).flatMap((topic) => Array.isArray(topic.include_keywords) ? topic.include_keywords.map(String) : []))];
-  const { data: jobs, error: jobError } = await admin.from("processing_jobs").select("*, attachments(*, notices(title))").in("status", ["대기", "처리 중"]).lte("run_after", new Date().toISOString()).limit(30);
+  const { data: jobs, error: jobError } = await admin.from("processing_jobs").select("*, attachments(*)").in("status", ["대기", "처리 중"]).lte("run_after", new Date().toISOString()).order("updated_at", { ascending: true }).limit(MAX_QUEUE_SCAN);
   if (jobError) throw jobError;
-  const candidates = (jobs ?? []).filter((job: Row) => {
-    if (noticeIds && !noticeIds.includes(String((job.attachments as Row | undefined)?.notice_id ?? ""))) return false;
-    const title = String((job.attachments as Row | undefined)?.notices?.title ?? "");
-    return keywords.some((keyword) => normalize(title).includes(normalize(keyword)));
-  }).slice(0, MAX_PER_BATCH);
+  const candidates = (jobs ?? []).filter((job: Row) => !noticeIds || noticeIds.includes(String((job.attachments as Row | undefined)?.notice_id ?? "")));
 
   let completed = 0;
+  const startedAt = Date.now();
   for (const job of candidates) {
+    if (Date.now() - startedAt >= PROCESSING_BUDGET_MS) break;
     const attachment = job.attachments as Row | undefined;
     if (!attachment) continue;
     await admin.from("processing_jobs").update({ status: "처리 중", attempts: Number(job.attempts) + 1, updated_at: new Date().toISOString() }).eq("id", job.id);
@@ -31,5 +31,5 @@ export async function runAttachmentPass(noticeIds?: string[]) {
     await admin.from("processing_jobs").update({ status: processed.status === "분석 완료" || processed.status === "부분 분석" || processed.status === "보류" ? "완료" : "실패", failure_reason: processed.failureReason ?? null, updated_at: new Date().toISOString() }).eq("id", job.id);
     completed += 1;
   }
-  return { attachmentProcessed: completed, attachmentCandidates: candidates.length };
+  return { attachmentProcessed: completed, attachmentCandidates: candidates.length, pending: Math.max(0, candidates.length - completed) };
 }

@@ -13,12 +13,14 @@ export async function runDailyBatch() {
   try {
     await ensureDefaultTopic();
     const collection = await runCollectionPass();
-    const attachment = await runAttachmentPass(collection.noticeIds);
+    const attachment = await runAttachmentPass();
     const analysis = await runAnalysisPass(collection.noticeIds);
     const result = { ...collection, ...attachment, analyzed: analysis.analyzed };
+    const status = result.pending > 0 ? "부분 완료" : "완료";
     const { error: finishError } = await admin.from("batch_runs").update({
-      completed_at: new Date().toISOString(), status: "완료", discovered: result.discovered,
+      completed_at: new Date().toISOString(), status, discovered: result.discovered,
       changed: result.changed, analyzed: result.analyzed, api_calls: 4,
+      error_summary: result.pending > 0 ? `첨부문서 ${result.pending}건이 처리 시간 안에 끝나지 않았습니다.` : null,
     }).eq("id", started.id);
     if (finishError) throw finishError;
     return result;

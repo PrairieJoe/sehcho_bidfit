@@ -1,5 +1,4 @@
 import JSZip from "jszip";
-import { createSupabaseAdminClient } from "@/lib/supabase";
 import type { Attachment } from "@/lib/types";
 
 export const MAX_ATTACHMENTS_PER_NOTICE = 3;
@@ -8,7 +7,6 @@ const MAX_EXTRACTED_TEXT_CHARS = 200_000;
 
 function extensionOf(name: string) { return name.split("?")[0].split(".").pop()?.toLowerCase() ?? ""; }
 function cleanXml(value: string) { return value.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim(); }
-function safeName(name: string) { return name.replace(/[^a-zA-Z0-9가-힣._-]/g, "_"); }
 
 export async function processAttachment(noticeId: string, attachment: Attachment): Promise<Attachment> {
   const extension = extensionOf(attachment.name || attachment.sourceUrl || "");
@@ -21,9 +19,6 @@ export async function processAttachment(noticeId: string, attachment: Attachment
     if (declaredSize > MAX_ATTACHMENT_BYTES) return { ...attachment, status: "보류", failureReason: "파일 크기가 10MB 제한을 초과합니다." };
     const bytes = Buffer.from(await response.arrayBuffer());
     if (bytes.length > MAX_ATTACHMENT_BYTES) return { ...attachment, status: "보류", failureReason: "파일 크기가 10MB 제한을 초과합니다." };
-    const storagePath = `${noticeId}/${attachment.id}-${safeName(attachment.name)}`;
-    const admin = createSupabaseAdminClient();
-    await admin.storage.from("bid-documents").upload(storagePath, bytes, { upsert: true, contentType: response.headers.get("content-type") ?? undefined });
     let text = "";
     let pages: number | undefined;
     if (extension === "pdf") {
@@ -37,8 +32,8 @@ export async function processAttachment(noticeId: string, attachment: Attachment
       text = (await Promise.all(sections.map((file) => file.async("string")))).map(cleanXml).join("\n");
       pages = sections.length || undefined;
     }
-    if (!text.trim()) return { ...attachment, status: "부분 분석", storagePath, pages, failureReason: "텍스트를 추출하지 못했습니다. 원문 확인이 필요합니다." };
-    return { ...attachment, status: "분석 완료", storagePath, pages, extractedText: text.slice(0, MAX_EXTRACTED_TEXT_CHARS) };
+    if (!text.trim()) return { ...attachment, status: "부분 분석", pages, failureReason: "텍스트를 추출하지 못했습니다. 원문 확인이 필요합니다." };
+    return { ...attachment, status: "분석 완료", pages, extractedText: text.slice(0, MAX_EXTRACTED_TEXT_CHARS) };
   } catch (error) {
     return { ...attachment, status: "추출 실패", failureReason: error instanceof Error ? error.message : "첨부파일 처리 중 알 수 없는 오류" };
   }
