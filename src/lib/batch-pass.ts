@@ -1,4 +1,5 @@
 import { runAnalysisPass } from "@/lib/analysis-pass";
+import { runAttachmentPass } from "@/lib/attachment-pass";
 import { runCollectionPass } from "@/lib/collection-pass";
 import { ensureDefaultTopic } from "@/lib/repository";
 import { createSupabaseAdminClient } from "@/lib/supabase";
@@ -11,8 +12,9 @@ export async function runDailyBatch() {
   try {
     await ensureDefaultTopic();
     const collection = await runCollectionPass();
+    const attachment = await runAttachmentPass();
     const analysis = await runAnalysisPass();
-    const result = { ...collection, analyzed: analysis.analyzed };
+    const result = { ...collection, ...attachment, analyzed: analysis.analyzed };
     const { error: finishError } = await admin.from("batch_runs").update({
       completed_at: new Date().toISOString(), status: "완료", discovered: result.discovered,
       changed: result.changed, analyzed: result.analyzed, api_calls: 4,
