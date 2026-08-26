@@ -13,7 +13,7 @@ function value(item: Record<string, unknown>, ...keys: string[]) {
 }
 function apiDate(input: string) {
   const match = input.match(/(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})?/);
-  if (!match) return new Date().toISOString();
+  if (!match) return "";
   const [, year, month, day, hour = "00", minute = "00"] = match;
   return new Date(`${year}-${month}-${day}T${hour}:${minute}:00+09:00`).toISOString();
 }
