@@ -39,6 +39,15 @@ export class SupabaseRepository {
   async runDailyAnalysis() { return runBatch(); }
 }
 
+export async function ensureDefaultTopic() {
+  const admin = createSupabaseAdminClient();
+  const { data: topics, error } = await admin.from("topics").select("id").limit(1);
+  if (error) throw error;
+  if (topics?.length) return;
+  const { error: insertError } = await admin.from("topics").insert({ user_id: null, name: defaultTopic.name, description: defaultTopic.description, capabilities: defaultTopic.capabilities, include_keywords: defaultTopic.includeKeywords, exclude_keywords: defaultTopic.excludeKeywords, business_types: defaultTopic.businessTypes, regions: defaultTopic.regions, min_budget: defaultTopic.minBudget, max_budget: defaultTopic.maxBudget, minimum_days: defaultTopic.minimumDays, threshold: defaultTopic.threshold });
+  if (insertError) throw insertError;
+}
+
 export async function runBatch() {
   const admin = createSupabaseAdminClient(); const { data: started, error } = await admin.from("batch_runs").insert({}).select().single(); if (error) throw error;
   try { const notices = await getBidSource().listNotices(new Date(Date.now() - 72 * 3_600_000), new Date()); for (const notice of notices) { const hash = JSON.stringify([notice.title, notice.closesAt, notice.status, notice.description]); const row = { bid_number: notice.bidNumber, bid_order: notice.order, title: notice.title, business_type: notice.businessType, status: notice.status, agency: notice.agency, demand_agency: notice.demandAgency, region: notice.region, published_at: notice.publishedAt, closes_at: notice.closesAt, budget: notice.budget, budget_label: notice.budgetLabel, contract_method: notice.contractMethod, detail_url: notice.detailUrl, description: notice.description, tasks: notice.tasks, qualifications: notice.qualifications, change_summary: notice.changeSummary ?? null, source_hash: hash, updated_at: new Date().toISOString() }; const { data: saved, error: upsertError } = await admin.from("notices").upsert(row, { onConflict: "bid_number,bid_order" }).select().single(); if (upsertError) throw upsertError; await admin.from("notice_versions").upsert({ notice_id: saved.id, source_hash: hash, source_payload: notice }, { onConflict: "notice_id,source_hash" }); for (const attachment of notice.attachments.slice(0, 3)) { const { data: savedAttachment } = await admin.from("attachments").upsert({ notice_id: saved.id, source_url: attachment.sourceUrl ?? `unavailable:${attachment.id}`, name: attachment.name, kind: attachment.kind, status: attachment.status }, { onConflict: "notice_id,source_url" }).select().single(); if (savedAttachment) await admin.from("processing_jobs").upsert({ attachment_id: savedAttachment.id, status: "대기" }, { onConflict: "attachment_id" }); } }

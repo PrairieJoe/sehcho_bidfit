@@ -1,6 +1,6 @@
 import { currentRepository } from "@/lib/session";
 import { requireAdmin } from "@/lib/auth";
-import { runBatch } from "@/lib/repository";
+import { ensureDefaultTopic, runBatch } from "@/lib/repository";
 
 export const dynamic = "force-dynamic";
 
@@ -9,5 +9,5 @@ export async function GET() {
 }
 
 export async function POST() {
-  try { await requireAdmin(); const run = await runBatch(); return Response.json(run, { status: 201 }); } catch (error) { return Response.json({ message: error instanceof Error ? error.message : "배치 실행에 실패했습니다." }, { status: 500 }); }
+  try { await requireAdmin(); await ensureDefaultTopic(); const run = await runBatch(); return Response.json(run, { status: 201 }); } catch (error) { return Response.json({ message: error instanceof Error ? error.message : "배치 실행에 실패했습니다." }, { status: 500 }); }
 }
