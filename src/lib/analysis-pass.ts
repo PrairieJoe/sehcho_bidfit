@@ -22,15 +22,6 @@ export async function runAnalysisPass(noticeIds?: string[]) {
   if (noticeError) throw noticeError;
   const engine = new RuleAnalysisEngine();
   const notices = (rows ?? []).map(noticeOf);
-  if (noticeIds) {
-    const { data: existingScores, error: existingScoreError } = await admin.from("topic_scores").select("notice_id").in("topic_id", topics.map((topic) => topic.id));
-    if (existingScoreError) throw existingScoreError;
-    const staleIds = [...new Set((existingScores ?? []).map((score) => String(score.notice_id)).filter((id) => !noticeIds.includes(id)))];
-    if (staleIds.length) {
-      const { error: staleDeleteError } = await admin.from("topic_scores").delete().in("notice_id", staleIds).in("topic_id", topics.map((topic) => topic.id));
-      if (staleDeleteError) throw staleDeleteError;
-    }
-  }
   // 공개 점수는 적어도 하나의 첨부문서가 텍스트 추출까지 완료되고, 처리 가능한
   // 첨부문서가 더 이상 대기 중이 아닐 때만 생성한다.
   const ready = notices.filter((notice) => {

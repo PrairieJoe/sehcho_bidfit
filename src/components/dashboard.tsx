@@ -92,7 +92,7 @@ function Overview({ notices, pendingCount = 0, eligible, topic, onOpen, onShowAl
   const analyzed = notices.filter((item) => item.analysis).length;
   const pending = pendingCount;
   const changed = notices.filter((item) => item.status === "정정" || item.status === "재공고").length;
-  const isRunning = latestRun?.status === "실행 중";
+  const isRunning = latestRun?.status === "실행 중" || latestRun?.status === "분석 중";
   const isPartial = latestRun?.status === "부분 완료";
   const statusText = !latestRun
     ? "첫 정기 업데이트를 기다리고 있습니다. 완료 전에는 공고 결과를 표시하지 않습니다."

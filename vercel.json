@@ -1,5 +1,13 @@
 {
   "crons": [
     { "path": "/api/cron/daily", "schedule": "0 23 * * *" }
-  ]
+  ],
+  "functions": {
+    "app/api/queues/attachment/route.ts": {
+      "maxDuration": 300,
+      "experimentalTriggers": [
+        { "type": "queue/v2beta", "topic": "bidfit-attachment", "retryAfterSeconds": 60 }
+      ]
+    }
+  }
 }

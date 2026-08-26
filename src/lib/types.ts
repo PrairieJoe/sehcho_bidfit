@@ -96,7 +96,7 @@ export interface BatchRun {
   id: string;
   startedAt: string;
   completedAt?: string;
-  status: "완료" | "실행 중" | "부분 완료";
+  status: "완료" | "실행 중" | "분석 중" | "부분 완료";
   discovered: number;
   changed: number;
   analyzed: number;

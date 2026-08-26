@@ -26,6 +26,8 @@ export async function runCollectionPass() {
   const attachments = validNotices.flatMap((notice) => notice.attachments.slice(0, 3).map((attachment) => ({ notice_id: idByKey.get(`${notice.bidNumber}-${notice.order}`), source_url: attachment.sourceUrl ?? `unavailable:${attachment.id}`, name: attachment.name, kind: attachment.kind, status: attachment.status }))).filter((row) => row.notice_id);
   const savedAttachments: Record<string, any>[] = [];
   for (const part of chunk(attachments, 50)) { if (!part.length) continue; const { data, error } = await admin.from("attachments").upsert(part, { onConflict: "notice_id,source_url" }).select("id"); if (error) throw error; savedAttachments.push(...(data ?? [])); }
-  for (const part of chunk(savedAttachments.map((row) => ({ attachment_id: row.id, status: "대기", failure_reason: null, updated_at: now })), 50)) { if (!part.length) continue; const { error } = await admin.from("processing_jobs").upsert(part, { onConflict: "attachment_id" }); if (error) throw error; }
+  // Existing completed jobs must not be reset to "대기" every day. New and stale
+  // jobs are published to Vercel Queue by the batch coordinator instead.
+  for (const part of chunk(savedAttachments.map((row) => ({ attachment_id: row.id, status: "대기", failure_reason: null, updated_at: now })), 50)) { if (!part.length) continue; const { error } = await admin.from("processing_jobs").upsert(part, { onConflict: "attachment_id", ignoreDuplicates: true }); if (error) throw error; }
   return { discovered: validNotices.length, changed: validNotices.filter((notice) => notice.status === "정정" || notice.status === "재공고").length, missingDeadline: notices.length - validNotices.length, noticeIds: savedRows.map((row) => String(row.id)) };
 }
