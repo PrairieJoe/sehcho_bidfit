@@ -22,7 +22,7 @@ Vercel 프로젝트의 `Settings → Environment Variables`에서 `Production` �
 | `NARAJANGTEO_SERVICE_KEY` | 나라장터 OpenAPI 인증키 |
 | `CRON_SECRET` | Vercel Cron 호출 검증값 |
 | `GEMINI_API_KEY` | Gemini 텍스트 분석 API 키 |
-| `GEMINI_MODEL` | 선택값. 기본값은 `gemini-2.5-flash-lite` |
+| `GEMINI_MODEL` | 선택값. 기본값은 `gemini-3.1-flash-lite` |
 
 `SUPABASE_SERVICE_ROLE_KEY`와 `NARAJANGTEO_SERVICE_KEY`에는 `NEXT_PUBLIC_` 접두사를 붙이지 않습니다. 값 변경은 새 배포부터 적용됩니다.
 

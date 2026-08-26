@@ -20,7 +20,7 @@ export async function enqueueNoticeAiWhenReady(noticeId: string, delaySeconds = 
   if (error) throw error;
   const rows = attachments ?? [];
   if (!rows.some((item: Row) => item.status === "분석 완료") || rows.some((item: Row) => item.status === "대기" || item.status === "처리 중")) return { queued: false };
-  const analyzerVersion = `gemini:${process.env.GEMINI_MODEL ?? "gemini-2.5-flash-lite"}`;
+  const analyzerVersion = `gemini:${process.env.GEMINI_MODEL ?? "gemini-3.1-flash-lite"}`;
   const inputHash = createHash("sha256").update(`${analyzerVersion}|${rows.map((item: Row) => `${item.id}:${item.sha256 ?? ""}:${String((Array.isArray(item.attachment_texts) ? item.attachment_texts[0] : item.attachment_texts)?.extracted_text ?? "").length}`).sort().join("|")}`, "utf8").digest("hex");
   const { data: inserted, error: jobError } = await admin.from("notice_ai_jobs").upsert({ notice_id: noticeId, input_hash: inputHash, status: "대기" }, { onConflict: "notice_id,input_hash", ignoreDuplicates: true }).select("id,status").maybeSingle();
   if (jobError) throw jobError;
