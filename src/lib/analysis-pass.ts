@@ -18,12 +18,9 @@ export async function runAnalysisPass() {
   const { data: rows, error: noticeError } = await admin.from("notices").select("*").order("published_at", { ascending: false }).limit(100);
   if (noticeError) throw noticeError;
   const engine = new RuleAnalysisEngine();
-  let analyzed = 0;
-  for (const topicRow of topics) for (const row of (rows ?? []).filter((candidate) => !scored.has(`${topicRow.id}:${candidate.id}`)).slice(0, 30)) {
-    const result = engine.analyze(noticeOf(row), topicOf(topicRow));
-    const { error } = await admin.from("topic_scores").upsert({ topic_id: topicRow.id, notice_id: row.id, analysis: result, score: result.score, updated_at: new Date().toISOString() }, { onConflict: "topic_id,notice_id" });
-    if (error) throw error;
-    analyzed += 1;
-  }
+  const pendingRows = rows ?? [];
+  const scoreRows = topics.flatMap((topicRow) => pendingRows.filter((candidate) => !scored.has(`${topicRow.id}:${candidate.id}`)).map((row) => { const result = engine.analyze(noticeOf(row), topicOf(topicRow)); return { topic_id: topicRow.id, notice_id: row.id, analysis: result, score: result.score, updated_at: new Date().toISOString() }; }));
+  if (scoreRows.length) { const { error } = await admin.from("topic_scores").upsert(scoreRows, { onConflict: "topic_id,notice_id" }); if (error) throw error; }
+  const analyzed = scoreRows.length;
   return { analyzed };
 }
