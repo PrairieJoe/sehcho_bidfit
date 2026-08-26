@@ -15,7 +15,7 @@ export async function processAttachment(noticeId: string, attachment: Attachment
   if (!attachment.sourceUrl) return { ...attachment, status: "보류", failureReason: "나라장터 API가 첨부파일 다운로드 주소를 제공하지 않았습니다." };
   if (!['pdf', 'hwpx'].includes(extension)) return { ...attachment, status: "보류", failureReason: "PDF와 HWPX만 현재 처리합니다." };
   try {
-    const response = await fetch(attachment.sourceUrl, { cache: "no-store", redirect: "follow", signal: AbortSignal.timeout(8_000) });
+    const response = await fetch(attachment.sourceUrl, { cache: "no-store", redirect: "follow", signal: AbortSignal.timeout(5_000) });
     if (!response.ok) return { ...attachment, status: "다운로드 실패", failureReason: `다운로드 HTTP ${response.status}` };
     const declaredSize = Number(response.headers.get("content-length") ?? 0);
     if (declaredSize > MAX_ATTACHMENT_BYTES) return { ...attachment, status: "보류", failureReason: "파일 크기가 10MB 제한을 초과합니다." };

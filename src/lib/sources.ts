@@ -67,7 +67,7 @@ export class NarajangteoBidSource implements BidSource {
       notices.push(...items.map((entry) => normalizeItem(entry, businessType)).filter((entry): entry is BidNotice => Boolean(entry)));
       if (items.length < 20 || pageNo * 20 >= Number(payload.response?.body?.totalCount ?? 0)) break;
     }
-    const unique = Array.from(new Map(notices.map((notice) => [notice.id, notice])).values()).slice(0, 20);
+    const unique = Array.from(new Map(notices.map((notice) => [notice.id, notice])).values()).slice(0, 10);
     // Some public-data API partitions lag behind the current date. Keep the daily
     // 72-hour query first, then widen once so a temporary empty partition does not
     // appear as a successful zero-result batch.
