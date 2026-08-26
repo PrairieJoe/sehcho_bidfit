@@ -54,6 +54,8 @@ export interface AnalysisResult {
   positiveReasons: Evidence[];
   penalties: string[];
   uncertainties: string[];
+  aiModel?: string;
+  promptVersion?: string;
 }
 
 export interface BidNotice {

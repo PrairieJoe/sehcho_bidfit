@@ -29,11 +29,8 @@ export async function runAnalysisPass(noticeIds?: string[]) {
     const pending = notice.attachments.some((attachment) => attachment.status === "대기" || attachment.status === "처리 중");
     return hasCompleted && !pending && Boolean(notice.closesAt);
   });
-  const notReadyIds = notices.filter((notice) => !ready.some((candidate) => candidate.id === notice.id)).map((notice) => notice.id);
-  if (notReadyIds.length) {
-    const { error: deleteError } = await admin.from("topic_scores").delete().in("notice_id", notReadyIds).in("topic_id", topics.map((topic) => topic.id));
-    if (deleteError) throw deleteError;
-  }
+  // Gemini 분석이 완료되면 임시 추출 텍스트를 삭제한다. 따라서 이 레거시 규칙
+  // 재분석 경로가 기존 AI 결과를 삭제해서는 안 된다.
   const scoreRows = topics.flatMap((topicRow) => ready.map((notice) => { const result = engine.analyze(notice, topicOf(topicRow)); return { topic_id: topicRow.id, notice_id: notice.id, analysis: result, score: result.score, updated_at: new Date().toISOString() }; }));
   if (scoreRows.length) { const { error } = await admin.from("topic_scores").upsert(scoreRows, { onConflict: "topic_id,notice_id" }); if (error) throw error; }
   const analyzed = scoreRows.length;

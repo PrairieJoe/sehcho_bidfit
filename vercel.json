@@ -8,6 +8,15 @@
       "experimentalTriggers": [
         { "type": "queue/v2beta", "topic": "bidfit-attachment", "retryAfterSeconds": 60, "initialDelaySeconds": 0 }
       ]
+    },
+    "src/app/api/queues/notice-ai/route.ts": {
+      "maxDuration": 120,
+      "experimentalTriggers": [
+        { "type": "queue/v2beta", "topic": "bidfit-notice-ai", "retryAfterSeconds": 60, "initialDelaySeconds": 0 }
+      ]
+    },
+    "api/hwp-extract.py": {
+      "maxDuration": 60
     }
   }
 }

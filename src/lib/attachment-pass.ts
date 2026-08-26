@@ -1,6 +1,7 @@
 import { send } from "@vercel/queue";
-import { runAnalysisPass } from "@/lib/analysis-pass";
+import { createHash } from "node:crypto";
 import { processAttachment } from "@/lib/attachment-processing";
+import { enqueueNoticeAiWhenReady } from "@/lib/notice-ai-pass";
 import { createSupabaseAdminClient } from "@/lib/supabase";
 import type { Attachment } from "@/lib/types";
 
@@ -37,19 +38,20 @@ export async function processQueuedAttachmentJob(jobId: string) {
     id: String(attachment.id), name: String(attachment.name), kind: String(attachment.kind),
     status: String(attachment.status) as Attachment["status"], sourceUrl: String(attachment.source_url ?? ""),
   });
-  await admin.from("attachments").update({ status: processed.status, storage_path: null, pages: processed.pages ?? null, failure_reason: processed.failureReason ?? null, updated_at: new Date().toISOString() }).eq("id", attachment.id);
-  if (processed.extractedText) await admin.from("attachment_texts").upsert({ attachment_id: attachment.id, extracted_text: processed.extractedText, page_map: [], extractor_version: "keyword-v1" });
+  await admin.from("attachments").update({ status: processed.status, storage_path: null, pages: processed.pages ?? null, sha256: processed.extractedText ? createHash("sha256").update(processed.extractedText, "utf8").digest("hex") : null, failure_reason: processed.failureReason ?? null, updated_at: new Date().toISOString() }).eq("id", attachment.id);
+  if (processed.extractedText) await admin.from("attachment_texts").upsert({ attachment_id: attachment.id, extracted_text: processed.extractedText, page_map: [], extractor_version: "temporary-text-v1" });
   const terminal = processed.status === "분석 완료" || processed.status === "부분 분석" || processed.status === "보류";
   await admin.from("processing_jobs").update({ status: terminal ? "완료" : "실패", failure_reason: processed.failureReason ?? null, updated_at: new Date().toISOString() }).eq("id", jobId);
-  const analysis = await runAnalysisPass([String(attachment.notice_id)]);
+  const ai = await enqueueNoticeAiWhenReady(String(attachment.notice_id));
   await finishActiveBatchIfDrained();
-  return { skipped: false, attachmentStatus: processed.status, analyzed: analysis.analyzed };
+  return { skipped: false, attachmentStatus: processed.status, aiQueued: ai.queued };
 }
 
-async function finishActiveBatchIfDrained() {
+export async function finishActiveBatchIfDrained() {
   const admin = createSupabaseAdminClient();
-  const { count, error } = await admin.from("processing_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]);
-  if (error || (count ?? 0) > 0) return;
+  const { count: attachmentCount, error } = await admin.from("processing_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]);
+  const { count: aiCount, error: aiError } = await admin.from("notice_ai_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]);
+  if (error || aiError || (attachmentCount ?? 0) > 0 || (aiCount ?? 0) > 0) return;
   const { data: active } = await admin.from("batch_runs").select("id,started_at").eq("status", "분석 중").order("started_at", { ascending: false }).limit(1).maybeSingle();
   if (!active) return;
   const { count: analyzed } = await admin.from("topic_scores").select("id", { count: "exact", head: true }).gte("updated_at", active.started_at);

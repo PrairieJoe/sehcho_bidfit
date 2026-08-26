@@ -8,10 +8,22 @@ const MAX_EXTRACTED_TEXT_CHARS = 200_000;
 function extensionOf(name: string) { return name.split("?")[0].split(".").pop()?.toLowerCase() ?? ""; }
 function cleanXml(value: string) { return value.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim(); }
 
+async function extractLegacyHwp(attachment: Attachment): Promise<Attachment> {
+  const base = process.env.HWP_EXTRACTOR_URL ?? (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}/api/hwp-extract` : "");
+  const secret = process.env.CRON_SECRET;
+  if (!base || !secret) return { ...attachment, status: "보류", failureReason: "구형 HWP 추출기 설정이 없어 분석에서 제외했습니다." };
+  const response = await fetch(base, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${secret}` }, body: JSON.stringify({ sourceUrl: attachment.sourceUrl }), signal: AbortSignal.timeout(60_000) });
+  if (!response.ok) return { ...attachment, status: "추출 실패", failureReason: `구형 HWP 텍스트 추출 HTTP ${response.status}` };
+  const result = await response.json() as { text?: string; pages?: number; error?: string };
+  if (!result.text?.trim()) return { ...attachment, status: "부분 분석", pages: result.pages, failureReason: result.error ?? "구형 HWP에서 텍스트를 추출하지 못했습니다." };
+  return { ...attachment, status: "분석 완료", pages: result.pages, extractedText: result.text.slice(0, MAX_EXTRACTED_TEXT_CHARS) };
+}
+
 export async function processAttachment(noticeId: string, attachment: Attachment): Promise<Attachment> {
   const extension = extensionOf(attachment.name || attachment.sourceUrl || "");
   if (!attachment.sourceUrl) return { ...attachment, status: "보류", failureReason: "나라장터 API가 첨부파일 다운로드 주소를 제공하지 않았습니다." };
-  if (!['pdf', 'hwpx'].includes(extension)) return { ...attachment, status: "보류", failureReason: "PDF와 HWPX만 현재 처리합니다." };
+  if (extension === "hwp") return extractLegacyHwp(attachment);
+  if (!['pdf', 'hwpx'].includes(extension)) return { ...attachment, status: "보류", failureReason: "PDF·HWP·HWPX만 현재 처리합니다." };
   try {
     const response = await fetch(attachment.sourceUrl, { cache: "no-store", redirect: "follow", signal: AbortSignal.timeout(5_000) });
     if (!response.ok) return { ...attachment, status: "다운로드 실패", failureReason: `다운로드 HTTP ${response.status}` };
