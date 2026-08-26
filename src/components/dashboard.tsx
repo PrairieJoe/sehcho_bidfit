@@ -39,10 +39,13 @@ export function Dashboard({ initialNotices, initialTopic, initialNotifications, 
   const runAnalysis = async () => {
     setRunning(true);
     try {
-      await fetch("/api/runs", { method: "POST" });
+      const response = await fetch("/api/runs", { method: "POST" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message ?? "배치 실행에 실패했습니다.");
       await refreshData();
-      setToast("오늘의 나라장터 수집 및 분석이 완료되었습니다.");
-    } finally { setRunning(false); }
+      setToast(`수집·분석 완료: 공고 ${result.discovered ?? 0}건, 분석 ${result.analyzed ?? 0}건`);
+    } catch (error) { setToast(error instanceof Error ? error.message : "배치 실행에 실패했습니다."); }
+    finally { setRunning(false); }
   };
 
 
