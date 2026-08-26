@@ -45,7 +45,7 @@ function normalizeItem(item: Record<string, unknown>, businessType: BusinessType
 
 export class NarajangteoBidSource implements BidSource {
   constructor(private readonly configuredKey = runtimeEnv("NARAJANGTEO_SERVICE_KEY")) {}
-  async listNotices(windowStart: Date, windowEnd: Date, allowFallback = true): Promise<BidNotice[]> {
+  async listNotices(windowStart: Date, windowEnd: Date, allowFallback = true, diagnostics: string[] = []): Promise<BidNotice[]> {
     const serviceKey = this.configuredKey?.trim().replace(/%([0-9A-Fa-f]{2})/g, (match) => String.fromCharCode(parseInt(match.slice(1), 16)));
     if (!serviceKey) throw new Error("NARAJANGTEO_SERVICE_KEY가 설정되지 않았습니다.");
     const notices: BidNotice[] = [];
@@ -61,6 +61,7 @@ export class NarajangteoBidSource implements BidSource {
       const raw = body?.items?.item;
       if (!body) throw new Error(`나라장터 ${businessType} API 응답 형식 오류`);
       const items = Array.isArray(raw) ? raw : raw ? [raw] : [];
+      diagnostics.push(`${businessType}: code=${String(header?.resultCode ?? "00")}, total=${String(body.totalCount ?? 0)}, items=${items.length}`);
       notices.push(...items.map((entry) => normalizeItem(entry, businessType)).filter((entry): entry is BidNotice => Boolean(entry)));
       if (items.length < 100 || pageNo * 100 >= Number(payload.response?.body?.totalCount ?? 0)) break;
     }
@@ -69,7 +70,9 @@ export class NarajangteoBidSource implements BidSource {
     // 72-hour query first, then widen once so a temporary empty partition does not
     // appear as a successful zero-result batch.
     if (allowFallback && !unique.length && windowEnd.getTime() - windowStart.getTime() <= 72 * 3_600_000 + 60_000) {
-      return this.listNotices(new Date(windowEnd.getTime() - 7 * 86_400_000), windowEnd, false);
+      const widened = await this.listNotices(new Date(windowEnd.getTime() - 7 * 86_400_000), windowEnd, false, diagnostics);
+      if (!widened.length) throw new Error(`나라장터 조회 결과가 없습니다. ${diagnostics.join(" / ")}`);
+      return widened;
     }
     return unique;
   }
