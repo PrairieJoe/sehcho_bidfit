@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminSession, isAdminCodeConfigured, verifyAdminCode } from "@/lib/admin-session";
 import { hasAdminSession } from "@/lib/admin-session";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() { return NextResponse.json({ authenticated: await hasAdminSession(), configured: isAdminCodeConfigured() }); }
 
 export async function POST(request: NextRequest) {
