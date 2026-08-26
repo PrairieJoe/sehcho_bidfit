@@ -54,11 +54,11 @@ export class NarajangteoBidSource implements BidSource {
       [["serviceKey", serviceKey], ["type", "json"], ["numOfRows", "100"], ["pageNo", String(pageNo)], ["inqryDiv", "1"], ["inqryBgnDt", requestDate(windowStart)], ["inqryEndDt", requestDate(windowEnd)]].forEach(([key, entry]) => url.searchParams.set(key, entry));
       const response = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store" });
       if (!response.ok) throw new Error(`나라장터 ${businessType} 목록 조회 실패 (${response.status})`);
-      const payload = await response.json() as { response?: { header?: { resultCode?: string | number; resultMsg?: string }; body?: { items?: { item?: Record<string, unknown> | Record<string, unknown>[] }; totalCount?: number } } };
+      const payload = await response.json() as { response?: { header?: { resultCode?: string | number; resultMsg?: string }; body?: { items?: { item?: Record<string, unknown> | Record<string, unknown>[] } | Record<string, unknown>[]; totalCount?: number } } };
       const header = payload.response?.header;
       if (header && String(header.resultCode ?? "00") !== "00") throw new Error(`나라장터 ${businessType} API 오류 (${header.resultCode}): ${header.resultMsg ?? "응답 오류"}`);
       const body = payload.response?.body;
-      const raw = body?.items?.item;
+      const raw = Array.isArray(body?.items) ? body.items : body?.items?.item;
       if (!body) throw new Error(`나라장터 ${businessType} API 응답 형식 오류`);
       const items = Array.isArray(raw) ? raw : raw ? [raw] : [];
       diagnostics.push(`${businessType}: code=${String(header?.resultCode ?? "00")}, total=${String(body.totalCount ?? 0)}, items=${items.length}`);
