@@ -12,14 +12,12 @@ export async function runAnalysisPass() {
   const { data: topics, error: topicError } = await admin.from("topics").select("*").limit(10);
   if (topicError) throw topicError;
   if (!topics?.length) return { analyzed: 0, message: "분석 주제가 없습니다." };
-  const { data: scores, error: scoreError } = await admin.from("topic_scores").select("topic_id,notice_id").in("topic_id", topics.map((topic) => topic.id));
-  if (scoreError) throw scoreError;
-  const scored = new Set((scores ?? []).map((score) => `${score.topic_id}:${score.notice_id}`));
   const { data: rows, error: noticeError } = await admin.from("notices").select("*").order("published_at", { ascending: false }).limit(500);
   if (noticeError) throw noticeError;
   const engine = new RuleAnalysisEngine();
-  const pendingRows = rows ?? [];
-  const scoreRows = topics.flatMap((topicRow) => pendingRows.filter((candidate) => !scored.has(`${topicRow.id}:${candidate.id}`)).map((row) => { const result = engine.analyze(noticeOf(row), topicOf(topicRow)); return { topic_id: topicRow.id, notice_id: row.id, analysis: result, score: result.score, updated_at: new Date().toISOString() }; }));
+  // Re-score the bounded set every day. This makes a topic setting change and
+  // a corrected notice version visible immediately, without a stale score.
+  const scoreRows = topics.flatMap((topicRow) => (rows ?? []).map((row) => { const result = engine.analyze(noticeOf(row), topicOf(topicRow)); return { topic_id: topicRow.id, notice_id: row.id, analysis: result, score: result.score, updated_at: new Date().toISOString() }; }));
   if (scoreRows.length) { const { error } = await admin.from("topic_scores").upsert(scoreRows, { onConflict: "topic_id,notice_id" }); if (error) throw error; }
   const analyzed = scoreRows.length;
   return { analyzed };
