@@ -3,7 +3,9 @@ import { runtimeEnv } from "@/lib/runtime-env";
 
 const BASE_URL = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService";
 const LIST_ENDPOINTS: Array<[BusinessType, string]> = [["용역", "getBidPblancListInfoServc"], ["물품", "getBidPblancListInfoThng"], ["공사", "getBidPblancListInfoCnstwk"], ["외자", "getBidPblancListInfoFrgcpt"]];
-const MAX_PAGES_PER_TYPE = 5;
+// Keep one invocation comfortably inside the Vercel Hobby function budget.
+// The next daily run continues with the overlapping time window.
+const MAX_PAGES_PER_TYPE = 1;
 
 function value(item: Record<string, unknown>, ...keys: string[]) {
   for (const key of keys) { const found = item[key]; if (found !== undefined && found !== null && String(found).trim()) return String(found).trim(); }
@@ -51,7 +53,7 @@ export class NarajangteoBidSource implements BidSource {
     const notices: BidNotice[] = [];
     for (const [businessType, endpoint] of LIST_ENDPOINTS) for (let pageNo = 1; pageNo <= MAX_PAGES_PER_TYPE; pageNo += 1) {
       const url = new URL(`${BASE_URL}/${endpoint}`);
-      [["serviceKey", serviceKey], ["type", "json"], ["numOfRows", "100"], ["pageNo", String(pageNo)], ["inqryDiv", "1"], ["inqryBgnDt", requestDate(windowStart)], ["inqryEndDt", requestDate(windowEnd)]].forEach(([key, entry]) => url.searchParams.set(key, entry));
+      [["serviceKey", serviceKey], ["type", "json"], ["numOfRows", "20"], ["pageNo", String(pageNo)], ["inqryDiv", "1"], ["inqryBgnDt", requestDate(windowStart)], ["inqryEndDt", requestDate(windowEnd)]].forEach(([key, entry]) => url.searchParams.set(key, entry));
       const response = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store" });
       if (!response.ok) throw new Error(`나라장터 ${businessType} 목록 조회 실패 (${response.status})`);
       const payload = await response.json() as { response?: { header?: { resultCode?: string | number; resultMsg?: string }; body?: { items?: { item?: Record<string, unknown> | Record<string, unknown>[] } | Record<string, unknown>[]; totalCount?: number } } };
@@ -63,7 +65,7 @@ export class NarajangteoBidSource implements BidSource {
       const items = Array.isArray(raw) ? raw : raw ? [raw] : [];
       diagnostics.push(`${businessType}: code=${String(header?.resultCode ?? "00")}, total=${String(body.totalCount ?? 0)}, items=${items.length}`);
       notices.push(...items.map((entry) => normalizeItem(entry, businessType)).filter((entry): entry is BidNotice => Boolean(entry)));
-      if (items.length < 100 || pageNo * 100 >= Number(payload.response?.body?.totalCount ?? 0)) break;
+      if (items.length < 20 || pageNo * 20 >= Number(payload.response?.body?.totalCount ?? 0)) break;
     }
     const unique = Array.from(new Map(notices.map((notice) => [notice.id, notice])).values());
     // Some public-data API partitions lag behind the current date. Keep the daily
