@@ -102,6 +102,7 @@ export interface BatchRun {
   analyzed: number;
   notified: number;
   apiCalls: number;
+  errorSummary?: string;
 }
 
 export interface BidSource {
