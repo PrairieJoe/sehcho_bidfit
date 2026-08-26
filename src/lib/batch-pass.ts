@@ -7,6 +7,7 @@ import { createSupabaseAdminClient } from "@/lib/supabase";
 /** Runs the daily unit of work and records the outcome shown on the dashboard. */
 export async function runDailyBatch() {
   const admin = createSupabaseAdminClient();
+  await admin.from("batch_runs").update({ completed_at: new Date().toISOString(), status: "부분 완료", error_summary: "이전 실행이 종료되지 않아 정리했습니다." }).eq("status", "실행 중");
   const { data: started, error: startError } = await admin.from("batch_runs").insert({}).select().single();
   if (startError || !started) throw startError ?? new Error("실행 이력을 만들 수 없습니다.");
   try {
