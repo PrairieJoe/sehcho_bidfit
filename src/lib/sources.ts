@@ -1,4 +1,5 @@
 import type { Attachment, BidNotice, BidSource, BusinessType, NoticeStatus } from "@/lib/types";
+import { runtimeEnv } from "@/lib/runtime-env";
 
 const BASE_URL = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService";
 const LIST_ENDPOINTS: Array<[BusinessType, string]> = [["용역", "getBidPblancListInfoServc"], ["물품", "getBidPblancListInfoThng"], ["공사", "getBidPblancListInfoCnstwk"], ["외자", "getBidPblancListInfoFrgcpt"]];
@@ -43,9 +44,9 @@ function normalizeItem(item: Record<string, unknown>, businessType: BusinessType
 }
 
 export class NarajangteoBidSource implements BidSource {
-  constructor(private readonly configuredKey = process.env.NARAJANGTEO_SERVICE_KEY) {}
+  constructor(private readonly configuredKey = runtimeEnv("NARAJANGTEO_SERVICE_KEY")) {}
   async listNotices(windowStart: Date, windowEnd: Date): Promise<BidNotice[]> {
-    const serviceKey = this.configuredKey;
+    const serviceKey = this.configuredKey?.trim().replace(/%([0-9A-Fa-f]{2})/g, (match) => String.fromCharCode(parseInt(match.slice(1), 16)));
     if (!serviceKey) throw new Error("NARAJANGTEO_SERVICE_KEY가 설정되지 않았습니다.");
     const notices: BidNotice[] = [];
     for (const [businessType, endpoint] of LIST_ENDPOINTS) for (let pageNo = 1; pageNo <= MAX_PAGES_PER_TYPE; pageNo += 1) {
@@ -53,7 +54,9 @@ export class NarajangteoBidSource implements BidSource {
       [["serviceKey", serviceKey], ["type", "json"], ["numOfRows", "100"], ["pageNo", String(pageNo)], ["inqryDiv", "1"], ["inqryBgnDt", requestDate(windowStart)], ["inqryEndDt", requestDate(windowEnd)]].forEach(([key, entry]) => url.searchParams.set(key, entry));
       const response = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store" });
       if (!response.ok) throw new Error(`나라장터 ${businessType} 목록 조회 실패 (${response.status})`);
-      const payload = await response.json() as { response?: { body?: { items?: { item?: Record<string, unknown> | Record<string, unknown>[] }; totalCount?: number } } };
+      const payload = await response.json() as { response?: { header?: { resultCode?: string | number; resultMsg?: string }; body?: { items?: { item?: Record<string, unknown> | Record<string, unknown>[] }; totalCount?: number } } };
+      const header = payload.response?.header;
+      if (header && String(header.resultCode ?? "00") !== "00") throw new Error(`나라장터 ${businessType} API 오류 (${header.resultCode}): ${header.resultMsg ?? "응답 오류"}`);
       const raw = payload.response?.body?.items?.item;
       const items = Array.isArray(raw) ? raw : raw ? [raw] : [];
       notices.push(...items.map((entry) => normalizeItem(entry, businessType)).filter((entry): entry is BidNotice => Boolean(entry)));
@@ -63,6 +66,6 @@ export class NarajangteoBidSource implements BidSource {
   }
 }
 export function getBidSource(): BidSource {
-  if (!process.env.NARAJANGTEO_SERVICE_KEY) throw new Error("NARAJANGTEO_SERVICE_KEY가 설정되지 않았습니다.");
+  if (!runtimeEnv("NARAJANGTEO_SERVICE_KEY")) throw new Error("NARAJANGTEO_SERVICE_KEY가 설정되지 않았습니다.");
   return new NarajangteoBidSource();
 }
