@@ -1,14 +1,15 @@
 import { createSupabaseAdminClient } from "@/lib/supabase";
+import { runtimeEnv } from "@/lib/runtime-env";
 
 export type SetupCheck = { key: string; label: string; status: "ready" | "missing" | "error"; detail: string; action: string };
 
 export async function getSetupStatus() {
   const checks: SetupCheck[] = [
-    { key: "admin", label: "관리자 코드", status: process.env.ADMIN_ACCESS_CODE ? "ready" : "missing", detail: process.env.ADMIN_ACCESS_CODE ? "설정됨" : "Vercel 환경변수에 없습니다.", action: "Vercel Production에 ADMIN_ACCESS_CODE를 등록하세요." },
-    { key: "supabase-url", label: "Supabase URL", status: process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL ? "ready" : "missing", detail: process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL ? "설정됨" : "Vercel 환경변수에 없습니다.", action: "Vercel Production에 SUPABASE_URL을 등록하세요." },
-    { key: "supabase-service", label: "Supabase 서버 키", status: process.env.SUPABASE_SERVICE_ROLE_KEY ? "ready" : "missing", detail: process.env.SUPABASE_SERVICE_ROLE_KEY ? "설정됨" : "Vercel 환경변수에 없습니다.", action: "Vercel Production에 SUPABASE_SERVICE_ROLE_KEY를 등록하세요." },
-    { key: "nara", label: "나라장터 API Key", status: process.env.NARAJANGTEO_SERVICE_KEY ? "ready" : "missing", detail: process.env.NARAJANGTEO_SERVICE_KEY ? "설정됨" : "Vercel 환경변수에 없습니다.", action: "Vercel Production에 NARAJANGTEO_SERVICE_KEY를 등록하세요." },
-    { key: "cron", label: "Cron 비밀값", status: process.env.CRON_SECRET ? "ready" : "missing", detail: process.env.CRON_SECRET ? "설정됨" : "Vercel 환경변수에 없습니다.", action: "Vercel Production에 CRON_SECRET을 등록하세요." },
+    { key: "admin", label: "관리자 코드", status: runtimeEnv("ADMIN_ACCESS_CODE") ? "ready" : "missing", detail: runtimeEnv("ADMIN_ACCESS_CODE") ? "설정됨" : "Vercel 환경변수에 없습니다.", action: "Vercel Production에 ADMIN_ACCESS_CODE를 등록하세요." },
+    { key: "supabase-url", label: "Supabase URL", status: runtimeEnv("SUPABASE_URL") || runtimeEnv("NEXT_PUBLIC_SUPABASE_URL") ? "ready" : "missing", detail: runtimeEnv("SUPABASE_URL") || runtimeEnv("NEXT_PUBLIC_SUPABASE_URL") ? "설정됨" : "Vercel 환경변수에 없습니다.", action: "Vercel Production에 SUPABASE_URL을 등록하세요." },
+    { key: "supabase-service", label: "Supabase 서버 키", status: runtimeEnv("SUPABASE_SERVICE_ROLE_KEY") ? "ready" : "missing", detail: runtimeEnv("SUPABASE_SERVICE_ROLE_KEY") ? "설정됨" : "Vercel 환경변수에 없습니다.", action: "Vercel Production에 SUPABASE_SERVICE_ROLE_KEY를 등록하세요." },
+    { key: "nara", label: "나라장터 API Key", status: runtimeEnv("NARAJANGTEO_SERVICE_KEY") ? "ready" : "missing", detail: runtimeEnv("NARAJANGTEO_SERVICE_KEY") ? "설정됨" : "Vercel 환경변수에 없습니다.", action: "Vercel Production에 NARAJANGTEO_SERVICE_KEY를 등록하세요." },
+    { key: "cron", label: "Cron 비밀값", status: runtimeEnv("CRON_SECRET") ? "ready" : "missing", detail: runtimeEnv("CRON_SECRET") ? "설정됨" : "Vercel 환경변수에 없습니다.", action: "Vercel Production에 CRON_SECRET을 등록하세요." },
   ];
   if (checks.some((check) => check.status !== "ready")) return { ready: false, checks };
   try {

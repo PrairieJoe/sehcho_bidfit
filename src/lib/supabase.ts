@@ -1,15 +1,17 @@
 import { createClient } from "@supabase/supabase-js";
+import { runtimeEnv } from "@/lib/runtime-env";
 
-const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
+const url = () => runtimeEnv("SUPABASE_URL") ?? runtimeEnv("NEXT_PUBLIC_SUPABASE_URL");
 
 // Public pages use the server-side service client. The anon key is retained
 // for optional Supabase browser integrations but is not required for this app.
-export const isSupabaseConfigured = () => Boolean(url && process.env.SUPABASE_SERVICE_ROLE_KEY);
+export const isSupabaseConfigured = () => Boolean(url() && runtimeEnv("SUPABASE_SERVICE_ROLE_KEY"));
 
 function requiredAdminConfig() {
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !serviceRoleKey) throw new Error("Supabase 환경변수가 설정되지 않았습니다.");
-  return { url, serviceRoleKey };
+  const serviceRoleKey = runtimeEnv("SUPABASE_SERVICE_ROLE_KEY");
+  const supabaseUrl = url();
+  if (!supabaseUrl || !serviceRoleKey) throw new Error("Supabase 환경변수가 설정되지 않았습니다.");
+  return { url: supabaseUrl, serviceRoleKey };
 }
 
 export function createSupabaseAdminClient() {
