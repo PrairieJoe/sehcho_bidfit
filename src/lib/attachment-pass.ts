@@ -7,7 +7,7 @@ const normalize = (value: string) => value.toLowerCase().replace(/\s/g, "");
 const MAX_PER_BATCH = 3;
 
 /** Processes a small, title-matched attachment queue within the Vercel Hobby budget. */
-export async function runAttachmentPass() {
+export async function runAttachmentPass(noticeIds?: string[]) {
   const admin = createSupabaseAdminClient();
   const { data: topics, error: topicError } = await admin.from("topics").select("include_keywords").limit(10);
   if (topicError) throw topicError;
@@ -15,6 +15,7 @@ export async function runAttachmentPass() {
   const { data: jobs, error: jobError } = await admin.from("processing_jobs").select("*, attachments(*, notices(title))").in("status", ["대기", "처리 중"]).lte("run_after", new Date().toISOString()).limit(30);
   if (jobError) throw jobError;
   const candidates = (jobs ?? []).filter((job: Row) => {
+    if (noticeIds && !noticeIds.includes(String((job.attachments as Row | undefined)?.notice_id ?? ""))) return false;
     const title = String((job.attachments as Row | undefined)?.notices?.title ?? "");
     return keywords.some((keyword) => normalize(title).includes(normalize(keyword)));
   }).slice(0, MAX_PER_BATCH);

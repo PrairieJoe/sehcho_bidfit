@@ -11,15 +11,26 @@ const attachmentOf = (row: Row) => {
 };
 const noticeOf = (row: Row): BidNotice => ({ id: String(row.id), bidNumber: String(row.bid_number), order: String(row.bid_order), title: String(row.title), businessType: String(row.business_type) as BidNotice["businessType"], status: String(row.status) as BidNotice["status"], agency: String(row.agency), demandAgency: String(row.demand_agency), region: String(row.region), publishedAt: String(row.published_at ?? ""), closesAt: String(row.closes_at ?? ""), budget: row.budget == null ? null : Number(row.budget), budgetLabel: String(row.budget_label), contractMethod: String(row.contract_method), detailUrl: String(row.detail_url), description: String(row.description), tasks: list(row.tasks), qualifications: list(row.qualifications), attachments: Array.isArray(row.attachments) ? row.attachments.map(attachmentOf) : [], reviewState: "검토 전" });
 
-export async function runAnalysisPass() {
+export async function runAnalysisPass(noticeIds?: string[]) {
   const admin = createSupabaseAdminClient();
   const { data: topics, error: topicError } = await admin.from("topics").select("*").limit(10);
   if (topicError) throw topicError;
   if (!topics?.length) return { analyzed: 0, message: "분석 주제가 없습니다." };
-  const { data: rows, error: noticeError } = await admin.from("notices").select("*, attachments(*, attachment_texts(*))").order("published_at", { ascending: false }).limit(500);
+  let noticeQuery = admin.from("notices").select("*, attachments(*, attachment_texts(*))").order("published_at", { ascending: false }).limit(500);
+  if (noticeIds) noticeQuery = noticeQuery.in("id", noticeIds);
+  const { data: rows, error: noticeError } = await noticeQuery;
   if (noticeError) throw noticeError;
   const engine = new RuleAnalysisEngine();
   const notices = (rows ?? []).map(noticeOf);
+  if (noticeIds) {
+    const { data: existingScores, error: existingScoreError } = await admin.from("topic_scores").select("notice_id").in("topic_id", topics.map((topic) => topic.id));
+    if (existingScoreError) throw existingScoreError;
+    const staleIds = [...new Set((existingScores ?? []).map((score) => String(score.notice_id)).filter((id) => !noticeIds.includes(id)))];
+    if (staleIds.length) {
+      const { error: staleDeleteError } = await admin.from("topic_scores").delete().in("notice_id", staleIds).in("topic_id", topics.map((topic) => topic.id));
+      if (staleDeleteError) throw staleDeleteError;
+    }
+  }
   // 공개 점수는 적어도 하나의 첨부문서가 텍스트 추출까지 완료되고, 처리 가능한
   // 첨부문서가 더 이상 대기 중이 아닐 때만 생성한다.
   const ready = notices.filter((notice) => {

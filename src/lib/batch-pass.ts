@@ -12,8 +12,8 @@ export async function runDailyBatch() {
   try {
     await ensureDefaultTopic();
     const collection = await runCollectionPass();
-    const attachment = await runAttachmentPass();
-    const analysis = await runAnalysisPass();
+    const attachment = await runAttachmentPass(collection.noticeIds);
+    const analysis = await runAnalysisPass(collection.noticeIds);
     const result = { ...collection, ...attachment, analyzed: analysis.analyzed };
     const { error: finishError } = await admin.from("batch_runs").update({
       completed_at: new Date().toISOString(), status: "완료", discovered: result.discovered,
