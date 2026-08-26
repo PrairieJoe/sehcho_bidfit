@@ -1,5 +1,6 @@
 import { enqueuePendingAttachmentJobs } from "@/lib/attachment-pass";
 import { runCollectionPass } from "@/lib/collection-pass";
+import { enqueueReadyNoticeAiJobs } from "@/lib/notice-ai-pass";
 import { ensureDefaultTopic } from "@/lib/repository";
 import { createSupabaseAdminClient } from "@/lib/supabase";
 
@@ -13,11 +14,12 @@ export async function runDailyBatch() {
     await ensureDefaultTopic();
     const collection = await runCollectionPass();
     const queue = await enqueuePendingAttachmentJobs();
-    const result = { ...collection, ...queue, analyzed: 0 };
+    const aiQueue = await enqueueReadyNoticeAiJobs();
+    const result = { ...collection, ...queue, ...aiQueue, analyzed: 0 };
     const { error: finishError } = await admin.from("batch_runs").update({
-      status: queue.attachmentQueued ? "분석 중" : "완료", completed_at: queue.attachmentQueued ? null : new Date().toISOString(), discovered: result.discovered,
+      status: queue.attachmentQueued || aiQueue.aiQueued ? "분석 중" : "완료", completed_at: queue.attachmentQueued || aiQueue.aiQueued ? null : new Date().toISOString(), discovered: result.discovered,
       changed: result.changed, analyzed: result.analyzed, api_calls: 4,
-      error_summary: queue.attachmentQueued ? `첨부문서 ${queue.attachmentQueued}건을 분석 대기열에 등록했습니다.` : null,
+      error_summary: queue.attachmentQueued || aiQueue.aiQueued ? `첨부문서 ${queue.attachmentQueued}건, 공고 AI 분석 ${aiQueue.aiQueued}건을 대기열에 등록했습니다.` : null,
     }).eq("id", started.id);
     if (finishError) throw finishError;
     return result;

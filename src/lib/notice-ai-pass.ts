@@ -19,13 +19,25 @@ export async function enqueueNoticeAiWhenReady(noticeId: string) {
   if (error) throw error;
   const rows = attachments ?? [];
   if (!rows.some((item: Row) => item.status === "분석 완료") || rows.some((item: Row) => item.status === "대기" || item.status === "처리 중")) return { queued: false };
-  const inputHash = createHash("sha256").update(rows.map((item: Row) => `${item.id}:${item.sha256 ?? ""}:${String((Array.isArray(item.attachment_texts) ? item.attachment_texts[0] : item.attachment_texts)?.extracted_text ?? "").length}`).sort().join("|"), "utf8").digest("hex");
+  const analyzerVersion = process.env.GEMINI_API_KEY ? `gemini:${process.env.GEMINI_MODEL ?? "gemini-2.5-flash"}` : "rule-fallback";
+  const inputHash = createHash("sha256").update(`${analyzerVersion}|${rows.map((item: Row) => `${item.id}:${item.sha256 ?? ""}:${String((Array.isArray(item.attachment_texts) ? item.attachment_texts[0] : item.attachment_texts)?.extracted_text ?? "").length}`).sort().join("|")}`, "utf8").digest("hex");
   const { data: inserted, error: jobError } = await admin.from("notice_ai_jobs").upsert({ notice_id: noticeId, input_hash: inputHash, status: "대기" }, { onConflict: "notice_id,input_hash", ignoreDuplicates: true }).select("id,status").maybeSingle();
   if (jobError) throw jobError;
   const job = inserted ?? (await admin.from("notice_ai_jobs").select("id,status").eq("notice_id", noticeId).eq("input_hash", inputHash).maybeSingle()).data;
   if (!job || job.status === "완료") return { queued: false };
   await send<NoticeAiQueueMessage>(NOTICE_AI_QUEUE_TOPIC, { aiJobId: String(job.id) }, { idempotencyKey: `${noticeId}:${inputHash}`, retentionSeconds: 86_400 });
   return { queued: true };
+}
+
+/** Enqueues old, already-extracted notices after an AI key or model is newly configured. */
+export async function enqueueReadyNoticeAiJobs() {
+  const admin = createSupabaseAdminClient();
+  const { data, error } = await admin.from("attachments").select("notice_id").eq("status", "분석 완료").limit(500);
+  if (error) throw error;
+  const noticeIds = [...new Set((data ?? []).map((row: Row) => String(row.notice_id)))];
+  let aiQueued = 0;
+  for (const noticeId of noticeIds) if ((await enqueueNoticeAiWhenReady(noticeId)).queued) aiQueued += 1;
+  return { aiQueued };
 }
 
 export async function processNoticeAiJob(aiJobId: string) {
@@ -41,13 +53,14 @@ export async function processNoticeAiJob(aiJobId: string) {
     const { data: topics, error: topicError } = await admin.from("topics").select("*").limit(10);
     if (topicError) throw topicError;
     const rule = new RuleAnalysisEngine();
+    const geminiEnabled = Boolean(process.env.GEMINI_API_KEY);
     for (const topicRow of topics ?? []) {
       const topic = topicOf(topicRow);
       const analysis = await analyzeWithGemini(notice, topic) ?? rule.analyze(notice, topic);
       const { error: scoreError } = await admin.from("topic_scores").upsert({ topic_id: topic.id, notice_id: notice.id, analysis, score: analysis.score, updated_at: new Date().toISOString() }, { onConflict: "topic_id,notice_id" });
       if (scoreError) throw scoreError;
     }
-    await admin.from("attachment_texts").delete().in("attachment_id", notice.attachments.map((item) => item.id));
+    if (geminiEnabled) await admin.from("attachment_texts").delete().in("attachment_id", notice.attachments.map((item) => item.id));
     await admin.from("notice_ai_jobs").update({ status: "완료", completed_at: new Date().toISOString(), failure_reason: null, updated_at: new Date().toISOString() }).eq("id", aiJobId);
     await finishActiveBatchIfDrained();
     return { skipped: false, analyzed: (topics ?? []).length };
