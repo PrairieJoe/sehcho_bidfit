@@ -15,7 +15,7 @@ export async function runAnalysisPass() {
   const { data: scores, error: scoreError } = await admin.from("topic_scores").select("topic_id,notice_id").in("topic_id", topics.map((topic) => topic.id));
   if (scoreError) throw scoreError;
   const scored = new Set((scores ?? []).map((score) => `${score.topic_id}:${score.notice_id}`));
-  const { data: rows, error: noticeError } = await admin.from("notices").select("*").order("published_at", { ascending: false }).limit(100);
+  const { data: rows, error: noticeError } = await admin.from("notices").select("*").order("published_at", { ascending: false }).limit(500);
   if (noticeError) throw noticeError;
   const engine = new RuleAnalysisEngine();
   const pendingRows = rows ?? [];
