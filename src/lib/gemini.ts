@@ -1,6 +1,7 @@
 import type { AnalysisResult, BidNotice, Evidence, Topic } from "@/lib/types";
 
-const MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
+// Flash-Lite keeps the daily batch economical while still returning structured Korean analysis.
+const MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash-lite";
 const MAX_INPUT_CHARS = 30_000;
 const MAX_OUTPUT_TOKENS = 700;
 
@@ -15,10 +16,11 @@ export function compactDocumentText(notice: BidNotice) {
   return body.slice(0, MAX_INPUT_CHARS);
 }
 
-export async function analyzeWithGemini(notice: BidNotice, topic: Topic): Promise<AnalysisResult | null> {
+export async function analyzeWithGemini(notice: BidNotice, topic: Topic): Promise<AnalysisResult> {
   const apiKey = process.env.GEMINI_API_KEY;
   const documentText = compactDocumentText(notice);
-  if (!apiKey || !documentText) return null;
+  if (!apiKey) throw new Error("Gemini API 키가 설정되지 않았습니다.");
+  if (!documentText) throw new Error("Gemini 분석에 사용할 추출 텍스트가 없습니다.");
   const prompt = `당신은 한국 공공입찰 검토 보조자입니다. 아래는 이미지·표를 제외하고 추출한 공고 첨부문서 텍스트입니다. 제목만으로 판단하지 말고 문서 내용만 근거로 관심 주제와의 적합도를 0~100 정수로 평가하세요. 원문을 길게 인용하지 말고, 짧은 요약 근거만 작성하세요. 제외 키워드가 문서에 있으면 score는 0입니다. 반드시 JSON만 반환하세요.\n\n관심 주제: ${topic.name}\n설명: ${topic.description}\n포함 키워드: ${topic.includeKeywords.join(", ") || "없음"}\n제외 키워드: ${topic.excludeKeywords.join(", ") || "없음"}\n\n반환 형식: {"score":0,"summary":"...","reasons":["..."],"penalties":["..."],"confidence":"높음|보통|낮음","eligibilityStatus":"충족 가능|확인 필요|조건 불일치"}\n\n첨부문서 텍스트:\n${documentText}`;
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent?key=${encodeURIComponent(apiKey)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json", maxOutputTokens: MAX_OUTPUT_TOKENS, temperature: 0.1 } }), signal: AbortSignal.timeout(60_000) });
   if (!response.ok) throw new Error(`Gemini API HTTP ${response.status}`);

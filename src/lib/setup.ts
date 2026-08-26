@@ -9,6 +9,7 @@ export async function getSetupStatus() {
     { key: "supabase-url", label: "Supabase URL", status: runtimeEnv("SUPABASE_URL") || runtimeEnv("NEXT_PUBLIC_SUPABASE_URL") ? "ready" : "missing", detail: runtimeEnv("SUPABASE_URL") || runtimeEnv("NEXT_PUBLIC_SUPABASE_URL") ? "설정됨" : "Vercel 환경변수에 없습니다.", action: "Vercel Production에 SUPABASE_URL을 등록하세요." },
     { key: "supabase-service", label: "Supabase 서버 키", status: runtimeEnv("SUPABASE_SERVICE_ROLE_KEY") ? "ready" : "missing", detail: runtimeEnv("SUPABASE_SERVICE_ROLE_KEY") ? "설정됨" : "Vercel 환경변수에 없습니다.", action: "Vercel Production에 SUPABASE_SERVICE_ROLE_KEY를 등록하세요." },
     { key: "nara", label: "나라장터 API Key", status: runtimeEnv("NARAJANGTEO_SERVICE_KEY") ? "ready" : "missing", detail: runtimeEnv("NARAJANGTEO_SERVICE_KEY") ? "설정됨" : "Vercel 환경변수에 없습니다.", action: "Vercel Production에 NARAJANGTEO_SERVICE_KEY를 등록하세요." },
+    { key: "gemini", label: "Gemini API Key", status: runtimeEnv("GEMINI_API_KEY") ? "ready" : "missing", detail: runtimeEnv("GEMINI_API_KEY") ? "설정됨" : "Vercel 환경변수에 없습니다.", action: "Vercel Production에 GEMINI_API_KEY를 등록하세요. 키가 없으면 공고 적합도 분석을 실행하지 않습니다." },
     { key: "cron", label: "Cron 비밀값", status: runtimeEnv("CRON_SECRET") ? "ready" : "missing", detail: runtimeEnv("CRON_SECRET") ? "설정됨" : "Vercel 환경변수에 없습니다.", action: "Vercel Production에 CRON_SECRET을 등록하세요." },
   ];
   if (checks.some((check) => check.status !== "ready")) return { ready: false, checks };

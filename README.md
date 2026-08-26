@@ -8,7 +8,7 @@
 - 관리자는 `/admin`에서 관리자 코드를 입력한 뒤 탐색 주제와 운영 상태를 관리합니다.
 - Supabase·나라장터·Cron 비밀값은 관리자 화면이나 Git에 저장하지 않고 Vercel 서버 환경변수로만 관리합니다.
 - 필수 설정이 빠진 배포본은 공개 화면 대신 관리자 설정 진단 화면으로 이동합니다.
-- AI 키가 없을 때는 규칙 기반 분석으로 동작합니다. `GEMINI_API_KEY`를 설정하면 공고당 한 번 Gemini 텍스트 분석을 수행합니다.
+- 공고 적합도는 `GEMINI_API_KEY`가 설정된 경우에만 공고당 한 번 Gemini 텍스트 분석으로 산정합니다. 키가 없을 때 키워드 기반 점수로 대체하지 않으며, 분석 결과도 생성하지 않습니다.
 
 ## Vercel 설정
 
@@ -22,7 +22,7 @@ Vercel 프로젝트의 `Settings → Environment Variables`에서 `Production` �
 | `NARAJANGTEO_SERVICE_KEY` | 나라장터 OpenAPI 인증키 |
 | `CRON_SECRET` | Vercel Cron 호출 검증값 |
 | `GEMINI_API_KEY` | Gemini 텍스트 분석 API 키 |
-| `GEMINI_MODEL` | 선택값. 기본값은 `gemini-2.5-flash` |
+| `GEMINI_MODEL` | 선택값. 기본값은 `gemini-2.5-flash-lite` |
 
 `SUPABASE_SERVICE_ROLE_KEY`와 `NARAJANGTEO_SERVICE_KEY`에는 `NEXT_PUBLIC_` 접두사를 붙이지 않습니다. 값 변경은 새 배포부터 적용됩니다.
 
