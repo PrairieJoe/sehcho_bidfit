@@ -3,6 +3,7 @@ import { requireAdmin } from "@/lib/auth";
 import { runDailyBatch } from "@/lib/batch-pass";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 300;
 
 export async function GET() {
   try { return Response.json(await (await currentRepository()).repository.listRuns()); } catch { return Response.json({ message: "인증이 필요합니다." }, { status: 401 }); }
