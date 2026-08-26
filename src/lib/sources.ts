@@ -12,7 +12,9 @@ function value(item: Record<string, unknown>, ...keys: string[]) {
   return "";
 }
 function apiDate(input: string) {
-  const match = input.match(/(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})?/);
+  // 나라장터는 `202608261125`, `2026-08-26 11:25:00`처럼 서로 다른
+  // 날짜 표기를 반환한다. 구분자를 제거한 뒤 같은 규칙으로 해석한다.
+  const match = input.replace(/\D/g, "").match(/^(\d{4})(\d{2})(\d{2})(\d{2})?(\d{2})?/);
   if (!match) return "";
   const [, year, month, day, hour = "00", minute = "00"] = match;
   return new Date(`${year}-${month}-${day}T${hour}:${minute}:00+09:00`).toISOString();
