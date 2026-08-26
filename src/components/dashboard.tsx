@@ -23,13 +23,14 @@ export function Dashboard({ initialNotices, initialTopic, initialNotifications, 
   const [selected, setSelected] = useState<BidNotice | null>(null);
   const [running, setRunning] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const visibleNotices = isAdmin ? notices : notices.filter((notice) => notice.analysis);
 
-  const filtered = useMemo(() => notices
+  const filtered = useMemo(() => visibleNotices
     .filter((notice) => typeFilter === "전체" || notice.businessType === typeFilter)
     .filter((notice) => `${notice.title} ${notice.agency} ${notice.demandAgency}`.toLowerCase().includes(query.toLowerCase()))
-    .sort((a, b) => (b.analysis?.score ?? 0) - (a.analysis?.score ?? 0) || new Date(a.closesAt).getTime() - new Date(b.closesAt).getTime()), [notices, query, typeFilter]);
+    .sort((a, b) => (b.analysis?.score ?? 0) - (a.analysis?.score ?? 0) || new Date(a.closesAt).getTime() - new Date(b.closesAt).getTime()), [visibleNotices, query, typeFilter]);
 
-  const eligible = notices.filter((notice) => notice.analysis && notice.analysis.score >= topic.threshold && notice.status !== "마감");
+  const eligible = visibleNotices.filter((notice) => notice.analysis && notice.analysis.score >= topic.threshold && notice.status !== "마감");
 
   const refreshData = async () => {
     const [noticeResponse, runResponse] = await Promise.all([fetch("/api/bids"), fetch("/api/runs")]);
@@ -68,7 +69,7 @@ export function Dashboard({ initialNotices, initialTopic, initialNotifications, 
 
       <section className="content">
         <header className="topbar"><button className="icon-button mobile-menu" aria-label="메뉴"><Menu size={20} /></button><div className="crumb">나라장터 입찰공고 <ChevronRight size={15} /> <strong>{tab === "dashboard" ? "오늘의 분석" : tab === "notices" ? "전체 공고" : tab === "operations" ? "운영 현황" : "전체 공고"}</strong></div><div className="topbar-right"><span className="data-pill"><span className="live-dot" />나라장터 연계</span></div></header>
-        {tab === "dashboard" && <Overview notices={notices} eligible={eligible} topic={topic} onOpen={setSelected} onShowAll={() => setTab("notices")} isAdmin={isAdmin} latestRun={runs[0]} />}
+        {tab === "dashboard" && <Overview notices={visibleNotices} pendingCount={notices.length - visibleNotices.length} eligible={eligible} topic={topic} onOpen={setSelected} onShowAll={() => setTab("notices")} isAdmin={isAdmin} latestRun={runs[0]} />}
         {tab === "notices" && <NoticeList notices={filtered} query={query} typeFilter={typeFilter} onQuery={setQuery} onType={setTypeFilter} onOpen={setSelected} />}
         {tab === "operations" && isAdmin && <Operations runs={runs} notices={notices} />}
       </section>
@@ -82,10 +83,10 @@ function NavItem({ active, icon, label, badge, onClick }: { active: boolean; ico
   return <button className={`nav-item ${active ? "active" : ""}`} onClick={onClick}>{icon}<span>{label}</span>{badge && <em>{badge}</em>}</button>;
 }
 
-function Overview({ notices, eligible, topic, onOpen, onShowAll, isAdmin, latestRun }: { notices: BidNotice[]; eligible: BidNotice[]; topic: Topic; onOpen: (notice: BidNotice) => void; onShowAll: () => void; isAdmin: boolean; latestRun?: BatchRun }) {
+function Overview({ notices, pendingCount = 0, eligible, topic, onOpen, onShowAll, isAdmin, latestRun }: { notices: BidNotice[]; pendingCount?: number; eligible: BidNotice[]; topic: Topic; onOpen: (notice: BidNotice) => void; onShowAll: () => void; isAdmin: boolean; latestRun?: BatchRun }) {
   const high = notices.filter((item) => (item.analysis?.score ?? 0) >= 85).length;
   const analyzed = notices.filter((item) => item.analysis).length;
-  const pending = notices.length - analyzed;
+  const pending = pendingCount + notices.length - analyzed;
   const changed = notices.filter((item) => item.status === "정정" || item.status === "재공고").length;
   return <div className="page-content">
     <section className="title-row"><div><p className="eyebrow">매일 08:00~09:00 KST 정기 수집</p><h1>오늘의 입찰 기회</h1><p className="lede"><strong>{topic.name}</strong> 주제 기준으로 {analyzed}건의 분석이 완료되었습니다. {pending > 0 ? `${pending}건은 아직 분석 대기 중입니다.` : "모든 공고 분석이 완료되었습니다."} 원문 공고와 첨부문서를 최종 확인하세요.</p><p className="muted">최근 자동 실행: {latestRun ? `${time(latestRun.startedAt)} · ${latestRun.status}` : "아직 실행 이력 없음"}</p></div></section>
