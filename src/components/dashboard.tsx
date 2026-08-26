@@ -11,7 +11,8 @@ const money = (value: number | null) => value ? `${(value / 100_000_000).toFixed
 const time = (value: string) => value && !Number.isNaN(new Date(value).getTime()) ? new Intl.DateTimeFormat("ko-KR", { month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value)) : "확인 필요";
 const daysLeft = (value: string) => value && !Number.isNaN(new Date(value).getTime()) ? Math.ceil((new Date(value).getTime() - Date.now()) / 86_400_000) : 0;
 const scoreTone = (score: number) => score >= 85 ? "score-excellent" : score >= 70 ? "score-high" : score >= 50 ? "score-medium" : "score-low";
-const pendingAnalysis: AnalysisResult = { score: 0, grade: "낮음", confidence: "낮음", eligibilityStatus: "확인 필요", summary: "아직 분석 결과가 생성되지 않았습니다.", components: [], positiveReasons: [], penalties: [], uncertainties: ["다음 배치에서 키워드 분석이 완료되면 결과가 표시됩니다."] };
+const isTitleCandidate = (notice: BidNotice, topic: Topic) => topic.includeKeywords.some((keyword) => notice.title.toLowerCase().replace(/\s/g, "").includes(keyword.toLowerCase().replace(/\s/g, "")));
+const pendingAnalysis: AnalysisResult = { score: 0, grade: "낮음", confidence: "낮음", eligibilityStatus: "확인 필요", summary: "아직 분석 결과가 생성되지 않았습니다.", components: [], positiveReasons: [], penalties: [], uncertainties: ["이번 수집분에서 첨부문서 키워드 근거가 확보되면 결과가 표시됩니다."] };
 
 export function Dashboard({ initialNotices, initialTopic, initialNotifications, initialRuns, userEmail, isAdmin }: Props) {
   const [tab, setTab] = useState<Tab>("dashboard");
@@ -24,6 +25,7 @@ export function Dashboard({ initialNotices, initialTopic, initialNotifications, 
   const [running, setRunning] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const visibleNotices = isAdmin ? notices : notices.filter((notice) => notice.analysis);
+  const candidatePendingCount = notices.filter((notice) => !notice.analysis && isTitleCandidate(notice, topic)).length;
 
   const filtered = useMemo(() => visibleNotices
     .filter((notice) => typeFilter === "전체" || notice.businessType === typeFilter)
@@ -69,7 +71,7 @@ export function Dashboard({ initialNotices, initialTopic, initialNotifications, 
 
       <section className="content">
         <header className="topbar"><button className="icon-button mobile-menu" aria-label="메뉴"><Menu size={20} /></button><div className="crumb">나라장터 입찰공고 <ChevronRight size={15} /> <strong>{tab === "dashboard" ? "오늘의 분석" : tab === "notices" ? "전체 공고" : tab === "operations" ? "운영 현황" : "전체 공고"}</strong></div><div className="topbar-right"><span className="data-pill"><span className="live-dot" />나라장터 연계</span></div></header>
-        {tab === "dashboard" && <Overview notices={visibleNotices} pendingCount={notices.length - visibleNotices.length} eligible={eligible} topic={topic} onOpen={setSelected} onShowAll={() => setTab("notices")} isAdmin={isAdmin} latestRun={runs[0]} />}
+        {tab === "dashboard" && <Overview notices={visibleNotices} pendingCount={candidatePendingCount} eligible={eligible} topic={topic} onOpen={setSelected} onShowAll={() => setTab("notices")} isAdmin={isAdmin} latestRun={runs[0]} />}
         {tab === "notices" && <NoticeList notices={filtered} query={query} typeFilter={typeFilter} onQuery={setQuery} onType={setTypeFilter} onOpen={setSelected} />}
         {tab === "operations" && isAdmin && <Operations runs={runs} notices={notices} />}
       </section>
@@ -86,13 +88,13 @@ function NavItem({ active, icon, label, badge, onClick }: { active: boolean; ico
 function Overview({ notices, pendingCount = 0, eligible, topic, onOpen, onShowAll, isAdmin, latestRun }: { notices: BidNotice[]; pendingCount?: number; eligible: BidNotice[]; topic: Topic; onOpen: (notice: BidNotice) => void; onShowAll: () => void; isAdmin: boolean; latestRun?: BatchRun }) {
   const high = notices.filter((item) => (item.analysis?.score ?? 0) >= 85).length;
   const analyzed = notices.filter((item) => item.analysis).length;
-  const pending = pendingCount + notices.length - analyzed;
+  const pending = pendingCount;
   const changed = notices.filter((item) => item.status === "정정" || item.status === "재공고").length;
   return <div className="page-content">
-    <section className="title-row"><div><p className="eyebrow">매일 08:00~09:00 KST 정기 수집</p><h1>오늘의 입찰 기회</h1><p className="lede"><strong>{topic.name}</strong> 주제 기준으로 {analyzed}건의 분석이 완료되었습니다. {pending > 0 ? `${pending}건은 아직 분석 대기 중입니다.` : "모든 공고 분석이 완료되었습니다."} 원문 공고와 첨부문서를 최종 확인하세요.</p><p className="muted">최근 자동 실행: {latestRun ? `${time(latestRun.startedAt)} · ${latestRun.status}` : "아직 실행 이력 없음"}</p></div></section>
+    <section className="title-row"><div><p className="eyebrow">매일 08:00~09:00 KST 정기 수집</p><h1>오늘의 입찰 기회</h1><p className="lede"><strong>{topic.name}</strong> 주제 기준으로 {analyzed}건의 분석이 완료되었습니다. {pending > 0 ? `${pending}건은 이번 수집분의 첨부문서 처리 대상입니다.` : "이번 수집분의 제목 기준 후보 처리가 완료되었습니다."} 원문 공고와 첨부문서를 최종 확인하세요.</p><p className="muted">최근 자동 실행: {latestRun ? `${time(latestRun.startedAt)} · ${latestRun.status}` : "아직 실행 이력 없음"}</p></div></section>
     <section className="metric-grid">
       <Metric icon={<FileText />} value={analyzed} label="분석 완료 공고" note="전일 기준 72시간 중첩 조회" />
-      <Metric icon={<Clock3 />} value={pending} label="분석 대기 공고" note="다음 자동 실행에서 처리" tone="orange" />
+      <Metric icon={<Clock3 />} value={pending} label="첨부문서 처리 대상" note="이번 수집분의 제목 기준 후보" tone="orange" />
       <Metric icon={<Sparkles />} value={eligible.length} label={`${topic.threshold}점 이상 추천`} note={`관심 주제: ${topic.name}`} tone="blue" />
       <Metric icon={<Clock3 />} value={high} label="우선 검토 공고" note="85점 이상 · 매우 높음" tone="green" />
       <Metric icon={<CircleAlert />} value={changed} label="정정·재공고" note="변경 내용을 확인하세요" tone="orange" />
