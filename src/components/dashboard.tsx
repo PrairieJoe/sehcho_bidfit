@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { Bell, ChevronRight, CircleAlert, Clock3, DatabaseZap, FileText, Filter, Mail, Menu, RefreshCw, Search, Settings2, SlidersHorizontal, Sparkles, X } from "lucide-react";
 import type { BatchRun, BidNotice, Notification, ReviewState, Topic } from "@/lib/types";
 
-type Tab = "dashboard" | "notices" | "topic" | "notifications" | "operations";
+type Tab = "dashboard" | "notices" | "notifications" | "operations";
 type Props = { initialNotices: BidNotice[]; initialTopic: Topic; initialNotifications: Notification[]; initialRuns: BatchRun[]; userEmail: string; isAdmin: boolean };
 
 const money = (value: number | null) => value ? `${(value / 100_000_000).toFixed(value >= 1_000_000_000 ? 1 : 2).replace(/\.0$/, "")}억원` : "금액 미정";
@@ -16,7 +16,6 @@ export function Dashboard({ initialNotices, initialTopic, initialNotifications, 
   const [tab, setTab] = useState<Tab>("dashboard");
   const [notices, setNotices] = useState(initialNotices);
   const [topic, setTopic] = useState(initialTopic);
-  const [notifications, setNotifications] = useState(initialNotifications);
   const [runs, setRuns] = useState(initialRuns);
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState("전체");
@@ -30,14 +29,11 @@ export function Dashboard({ initialNotices, initialTopic, initialNotifications, 
     .sort((a, b) => (b.analysis?.score ?? 0) - (a.analysis?.score ?? 0) || new Date(a.closesAt).getTime() - new Date(b.closesAt).getTime()), [notices, query, typeFilter]);
 
   const eligible = notices.filter((notice) => notice.analysis && notice.analysis.score >= topic.threshold && notice.status !== "마감");
-  const unread = notifications.filter((item) => !item.read).length;
 
   const refreshData = async () => {
-    const [noticeResponse, notificationResponse, runResponse, topicResponse] = await Promise.all([fetch("/api/bids"), fetch("/api/notifications"), fetch("/api/runs"), fetch("/api/topic")]);
+    const [noticeResponse, runResponse] = await Promise.all([fetch("/api/bids"), fetch("/api/runs")]);
     setNotices(await noticeResponse.json());
-    setNotifications(await notificationResponse.json());
     setRuns(await runResponse.json());
-    setTopic(await topicResponse.json());
   };
 
   const runAnalysis = async () => {
@@ -45,35 +41,12 @@ export function Dashboard({ initialNotices, initialTopic, initialNotifications, 
     try {
       await fetch("/api/runs", { method: "POST" });
       await refreshData();
-      setToast("오늘의 모의 수집 및 분석이 완료되었습니다.");
+      setToast("오늘의 나라장터 수집 및 분석이 완료되었습니다.");
     } finally { setRunning(false); }
   };
 
-  const saveTopic = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    const patch = {
-      name: String(form.get("name")), description: String(form.get("description")), capabilities: String(form.get("capabilities")),
-      includeKeywords: String(form.get("includeKeywords")).split(",").map((item) => item.trim()).filter(Boolean),
-      excludeKeywords: String(form.get("excludeKeywords")).split(",").map((item) => item.trim()).filter(Boolean),
-      minimumDays: Number(form.get("minimumDays")), threshold: Number(form.get("threshold")),
-    };
-    const response = await fetch("/api/topic", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) });
-    setTopic(await response.json());
-    await refreshData();
-    setToast("주제와 적합도 기준을 저장했습니다. 모든 공고 점수를 다시 계산했습니다.");
-  };
 
-  const updateReview = async (notice: BidNotice, reviewState: ReviewState) => {
-    await fetch(`/api/bids/${notice.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ reviewState, memo: notice.memo ?? "" }) });
-    await refreshData();
-    setSelected({ ...notice, reviewState });
-  };
 
-  const markRead = async (id: string) => {
-    await fetch("/api/notifications", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
-    setNotifications((items) => items.map((item) => item.id === id ? { ...item, read: true } : item));
-  };
 
   return (
     <main className="app-shell">
@@ -83,8 +56,6 @@ export function Dashboard({ initialNotices, initialTopic, initialNotifications, 
         <nav aria-label="주 메뉴">
           <NavItem active={tab === "dashboard"} icon={<Sparkles size={18} />} label="오늘의 공고" onClick={() => setTab("dashboard")} />
           <NavItem active={tab === "notices"} icon={<FileText size={18} />} label="전체 공고" onClick={() => setTab("notices")} />
-          {isAdmin && <NavItem active={tab === "topic"} icon={<SlidersHorizontal size={18} />} label="관리자 설정" onClick={() => setTab("topic")} />}
-          <NavItem active={tab === "notifications"} icon={<Bell size={18} />} label="알림 센터" badge={unread || undefined} onClick={() => setTab("notifications")} />
           <NavItem active={false} icon={<Settings2 size={18} />} label="관리자 페이지" onClick={() => { window.location.href = "/admin"; }} />
           {isAdmin && <NavItem active={tab === "operations"} icon={<Settings2 size={18} />} label="운영 현황" onClick={() => setTab("operations")} />}
         </nav>
@@ -92,14 +63,12 @@ export function Dashboard({ initialNotices, initialTopic, initialNotifications, 
       </aside>
 
       <section className="content">
-        <header className="topbar"><button className="icon-button mobile-menu" aria-label="메뉴"><Menu size={20} /></button><div className="crumb">나라장터 입찰공고 <ChevronRight size={15} /> <strong>{tab === "dashboard" ? "오늘의 분석" : tab === "notices" ? "전체 공고" : tab === "topic" ? "관리자 설정" : tab === "notifications" ? "알림 센터" : "운영 현황"}</strong></div><div className="topbar-right"><span className="data-pill"><span className="live-dot" />실시간 서비스</span><button className="icon-button" aria-label="알림" onClick={() => setTab("notifications")}><Bell size={19} />{unread > 0 && <b>{unread}</b>}</button></div></header>
+        <header className="topbar"><button className="icon-button mobile-menu" aria-label="메뉴"><Menu size={20} /></button><div className="crumb">나라장터 입찰공고 <ChevronRight size={15} /> <strong>{tab === "dashboard" ? "오늘의 분석" : tab === "notices" ? "전체 공고" : tab === "operations" ? "운영 현황" : "전체 공고"}</strong></div><div className="topbar-right"><span className="data-pill"><span className="live-dot" />나라장터 연계</span></div></header>
         {tab === "dashboard" && <Overview notices={notices} eligible={eligible} topic={topic} onRun={runAnalysis} running={running} onOpen={setSelected} onShowAll={() => setTab("notices")} isAdmin={isAdmin} />}
         {tab === "notices" && <NoticeList notices={filtered} query={query} typeFilter={typeFilter} onQuery={setQuery} onType={setTypeFilter} onOpen={setSelected} />}
-        {tab === "topic" && <TopicForm topic={topic} onSave={saveTopic} />}
-        {tab === "notifications" && <Notifications items={notifications} notices={notices} onRead={markRead} onOpen={setSelected} isAdmin={isAdmin} />}
         {tab === "operations" && isAdmin && <Operations runs={runs} notices={notices} onRun={runAnalysis} running={running} />}
       </section>
-      {selected && <NoticeDrawer notice={selected} onClose={() => setSelected(null)} onReview={updateReview} isAdmin={isAdmin} />}
+      {selected && <NoticeDrawer notice={selected} onClose={() => setSelected(null)} onReview={() => undefined} isAdmin={false} />}
       {toast && <div className="toast"><Sparkles size={18} />{toast}<button onClick={() => setToast(null)} aria-label="닫기"><X size={16} /></button></div>}
     </main>
   );
@@ -122,7 +91,7 @@ function Overview({ notices, eligible, topic, onRun, running, onOpen, onShowAll,
     </section>
     <section className="section-head"><div><h2>우선 검토 추천</h2><p>점수와 마감 임박도를 기준으로 정렬했습니다.</p></div><button className="text-button" onClick={onShowAll}>전체 공고 보기 <ChevronRight size={16} /></button></section>
     <section className="notice-grid">{eligible.slice(0, 3).map((notice) => <NoticeCard key={notice.id} notice={notice} onOpen={() => onOpen(notice)} />)}</section>
-    <section className="insight-panel"><div className="insight-icon"><Mail size={20} /></div><div><h3>이메일 알림 미리보기 준비됨</h3><p>기준 점수 이상 공고 {eligible.length}건이 다음 일일 요약 이메일 대상입니다. 이메일 제공업체 키를 등록하면 실제 발송으로 전환됩니다.</p></div><span className="preview-chip">미리보기 모드</span></section>
+    <section className="insight-panel"><div className="insight-icon"><Mail size={20} /></div><div><h3>원문 확인 안내</h3><p>추천 공고 {eligible.length}건을 확인할 수 있습니다. 적합도는 검토 보조 정보이므로 입찰 전 나라장터 원문과 첨부문서를 반드시 확인하세요.</p></div><span className="preview-chip">검토 보조</span></section>
   </div>;
 }
 

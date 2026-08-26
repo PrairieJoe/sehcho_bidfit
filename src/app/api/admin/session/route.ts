@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminSession, isAdminCodeConfigured, verifyAdminCode } from "@/lib/admin-session";
+import { hasAdminSession } from "@/lib/admin-session";
+
+export async function GET() { return NextResponse.json({ authenticated: await hasAdminSession(), configured: isAdminCodeConfigured() }); }
 
 export async function POST(request: NextRequest) {
   if (!isAdminCodeConfigured()) return NextResponse.json({ message: "관리자 코드가 아직 Vercel에 설정되지 않았습니다." }, { status: 503 });
