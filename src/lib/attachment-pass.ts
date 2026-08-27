@@ -100,11 +100,14 @@ export async function processQueuedAttachmentJob(jobId: string) {
 
 export async function finishActiveBatchIfDrained() {
   const admin = createSupabaseAdminClient();
-  const { count: attachmentCount, error } = await admin.from("processing_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]);
-  const { count: aiCount, error: aiError } = await admin.from("notice_ai_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]);
-  if (error || aiError || (attachmentCount ?? 0) > 0 || (aiCount ?? 0) > 0) return;
   const { data: active } = await admin.from("batch_runs").select("id,started_at").eq("status", "분석 중").order("started_at", { ascending: false }).limit(1).maybeSingle();
   if (!active) return;
+  const { count: attachmentCount, error } = await admin.from("processing_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]);
+  const { count: aiCount, error: aiError } = await admin.from("notice_ai_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]);
+  // Legacy jobs from prior runs must not block completion of the current run.
+  const { count: currentAttachments } = await admin.from("processing_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]).gte("created_at", active.started_at);
+  const { count: currentAi } = await admin.from("notice_ai_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]).gte("created_at", active.started_at);
+  if (error || aiError || (currentAttachments ?? 0) > 0 || (currentAi ?? 0) > 0) return;
   const { count: analyzed } = await admin.from("topic_scores").select("id", { count: "exact", head: true }).gte("updated_at", active.started_at);
   await admin.from("batch_runs").update({ status: "완료", completed_at: new Date().toISOString(), analyzed: analyzed ?? 0, error_summary: null }).eq("id", active.id);
 }
