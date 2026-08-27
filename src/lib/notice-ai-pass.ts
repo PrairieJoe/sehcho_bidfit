@@ -45,6 +45,7 @@ export async function enqueueNoticeAiWhenReady(noticeId: string, delaySeconds = 
 
 /** Enqueues old, already-extracted notices after an AI key or model is newly configured. */
 export async function enqueueReadyNoticeAiJobs(options: { publish?: boolean; noticeIds?: string[] } = {}) {
+  if (!process.env.GEMINI_API_KEY) throw new Error("Gemini API 키가 설정되지 않았습니다. 분석을 시작할 수 없습니다.");
   const admin = createSupabaseAdminClient();
   // Analyze every collected notice. Attachment-backed notices wait until all
   // supported files have extracted text; notices without attachments use the
@@ -64,7 +65,9 @@ export async function enqueueReadyNoticeAiJobs(options: { publish?: boolean; not
   // delay per notice made the tail of a recovery run take tens of minutes.
   for (let index = 0; index < noticeIds.length; index += 8) {
     const group = noticeIds.slice(index, index + 8);
-    const results = await Promise.all(group.map((noticeId) => enqueueNoticeAiWhenReady(noticeId, 0, options.publish ?? true).catch(() => ({ queued: false }))));
+    // Do not swallow enqueue errors. A silently skipped notice used to make a
+    // batch look complete while its score was never generated.
+    const results = await Promise.all(group.map((noticeId) => enqueueNoticeAiWhenReady(noticeId, 0, options.publish ?? true)));
     aiQueued += results.filter((result) => result.queued).length;
   }
   return { aiQueued };

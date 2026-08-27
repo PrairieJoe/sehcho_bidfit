@@ -78,8 +78,11 @@ export async function runGithubActionsBatch() {
     const { count: analyzed } = await admin.from("topic_scores").select("id", { count: "exact", head: true }).gte("updated_at", String(started.started_at));
     const { count: remainingAttachments } = await admin.from("processing_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]);
     const { count: remainingAi } = await admin.from("notice_ai_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]);
-    const complete = (remainingAttachments ?? 0) === 0 && (remainingAi ?? 0) === 0;
-    await admin.from("batch_runs").update({ status: complete ? "완료" : "부분 완료", completed_at: new Date().toISOString(), discovered: collection.discovered, changed: collection.changed, analyzed: analyzed ?? 0, api_calls: 1, error_summary: complete ? null : `작업 시간 제한으로 첨부 ${remainingAttachments ?? 0}건·AI ${remainingAi ?? 0}건이 다음 실행으로 이월되었습니다.` }).eq("id", started.id);
+    const { count: failedAttachments } = await admin.from("processing_jobs").select("id", { count: "exact", head: true }).eq("status", "실패").gte("updated_at", String(started.started_at));
+    const { count: failedAi } = await admin.from("notice_ai_jobs").select("id", { count: "exact", head: true }).eq("status", "실패").gte("updated_at", String(started.started_at));
+    const complete = (remainingAttachments ?? 0) === 0 && (remainingAi ?? 0) === 0 && (failedAttachments ?? 0) === 0 && (failedAi ?? 0) === 0;
+    const errorSummary = complete ? null : `처리 미완료: 대기 첨부 ${remainingAttachments ?? 0}건·대기 AI ${remainingAi ?? 0}건·실패 첨부 ${failedAttachments ?? 0}건·실패 AI ${failedAi ?? 0}건`;
+    await admin.from("batch_runs").update({ status: complete ? "완료" : "부분 완료", completed_at: new Date().toISOString(), discovered: collection.discovered, changed: collection.changed, analyzed: analyzed ?? 0, api_calls: 1, error_summary: errorSummary }).eq("id", started.id);
     return { ...collection, attachmentProcessed, aiProcessed, analyzed: analyzed ?? 0, complete };
   } catch (error) {
     await admin.from("batch_runs").update({ status: "부분 완료", completed_at: new Date().toISOString(), error_summary: error instanceof Error ? error.message : "작업자 실행 실패" }).eq("id", started.id);
