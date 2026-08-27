@@ -19,7 +19,17 @@ export async function enqueueNoticeAiWhenReady(noticeId: string, delaySeconds = 
   const { data: attachments, error } = await admin.from("attachments").select("id,status,sha256,attachment_texts(extracted_text)").eq("notice_id", noticeId);
   if (error) throw error;
   const rows = attachments ?? [];
-  if (!rows.some((item: Row) => item.status === "분석 완료") || rows.some((item: Row) => item.status === "대기" || item.status === "처리 중")) return { queued: false };
+  const completedRows = rows.filter((item: Row) => item.status === "분석 완료");
+  const textRows = completedRows.filter((item: Row) => String((Array.isArray(item.attachment_texts) ? item.attachment_texts[0] : item.attachment_texts)?.extracted_text ?? "").trim());
+  // An attachment may retain its terminal status after its text was deleted
+  // following a completed analysis. Never enqueue an AI job for that stale
+  // state: it would only produce "추출 텍스트가 없습니다" on every run.
+  if (!textRows.length || rows.some((item: Row) => item.status === "대기" || item.status === "처리 중")) {
+    if (!textRows.length) {
+      await admin.from("notice_ai_jobs").update({ status: "실패", failure_reason: "첨부문서 텍스트가 없어 Gemini 분석을 건너뛰었습니다.", updated_at: new Date().toISOString() }).eq("notice_id", noticeId).in("status", ["대기", "실패"]);
+    }
+    return { queued: false, reason: textRows.length ? "첨부문서 처리가 아직 끝나지 않았습니다." : "첨부문서 텍스트가 없습니다." };
+  }
   const analyzerVersion = `gemini:${process.env.GEMINI_MODEL ?? "gemini-3.5-flash-lite"}`;
   const inputHash = createHash("sha256").update(`${analyzerVersion}|${rows.map((item: Row) => `${item.id}:${item.sha256 ?? ""}:${String((Array.isArray(item.attachment_texts) ? item.attachment_texts[0] : item.attachment_texts)?.extracted_text ?? "").length}`).sort().join("|")}`, "utf8").digest("hex");
   const { data: inserted, error: jobError } = await admin.from("notice_ai_jobs").upsert({ notice_id: noticeId, input_hash: inputHash, status: "대기" }, { onConflict: "notice_id,input_hash", ignoreDuplicates: true }).select("id,status").maybeSingle();
