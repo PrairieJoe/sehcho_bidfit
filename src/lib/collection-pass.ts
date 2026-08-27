@@ -2,13 +2,15 @@ import { getBidSource } from "@/lib/sources";
 import { createSupabaseAdminClient } from "@/lib/supabase";
 
 const chunk = <T,>(items: T[], size: number) => Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, (index + 1) * size));
-async function retry<T>(operation: () => Promise<T>, attempts = 3): Promise<T> {
+async function retryQuery<T>(operation: () => Promise<{ data: T; error: { message?: string } | null }>, attempts = 3) {
   let last: unknown;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
-    try { return await operation(); } catch (error) {
-      last = error;
-      if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, attempt * 1_500));
-    }
+    try {
+      const result = await operation();
+      if (!result.error) return result;
+      last = result.error;
+    } catch (error) { last = error; }
+    if (attempt < attempts) await new Promise((resolve) => setTimeout(resolve, attempt * 1_500));
   }
   throw last instanceof Error ? last : new Error("Supabase 저장 재시도 실패");
 }
@@ -28,21 +30,20 @@ export async function runCollectionPass() {
   const savedRows: Record<string, any>[] = [];
   for (const part of chunk(rows, 50)) {
     if (!part.length) continue;
-    const { data, error } = await retry(() => admin.from("notices").upsert(part, { onConflict: "bid_number,bid_order" }).select("id,bid_number,bid_order"));
-    if (error) throw error;
+    const { data } = await retryQuery(() => admin.from("notices").upsert(part, { onConflict: "bid_number,bid_order" }).select("id,bid_number,bid_order"));
     savedRows.push(...(data ?? []));
   }
   if (savedRows.length !== rows.length) throw new Error("나라장터 공고 일괄 저장 결과가 일부 누락되었습니다.");
   const idByKey = new Map(savedRows.map((row) => [`${row.bid_number}-${row.bid_order}`, String(row.id)]));
   const versions = validNotices.map((notice) => ({ notice_id: idByKey.get(`${notice.bidNumber}-${notice.order}`), source_hash: JSON.stringify([notice.title, notice.closesAt, notice.status, notice.description]), source_payload: notice }));
-  for (const part of chunk(versions.filter((row) => row.notice_id), 25)) { const { error } = await retry(() => admin.from("notice_versions").upsert(part, { onConflict: "notice_id,source_hash" })); if (error) throw error; }
+  for (const part of chunk(versions.filter((row) => row.notice_id), 25)) { await retryQuery(() => admin.from("notice_versions").upsert(part, { onConflict: "notice_id,source_hash" }).select()); }
   // Do not overwrite an already processed attachment with the source's initial
   // `대기` status on every overlapping 72-hour collection run.
   const attachments = validNotices.flatMap((notice) => notice.attachments.map((attachment) => ({ notice_id: idByKey.get(`${notice.bidNumber}-${notice.order}`), source_url: attachment.sourceUrl ?? `unavailable:${attachment.id}`, name: attachment.name, kind: attachment.kind }))).filter((row) => row.notice_id);
   const savedAttachments: Record<string, any>[] = [];
-  for (const part of chunk(attachments, 25)) { if (!part.length) continue; const { data, error } = await retry(() => admin.from("attachments").upsert(part, { onConflict: "notice_id,source_url" }).select("id")); if (error) throw error; savedAttachments.push(...(data ?? [])); }
+  for (const part of chunk(attachments, 25)) { if (!part.length) continue; const { data } = await retryQuery(() => admin.from("attachments").upsert(part, { onConflict: "notice_id,source_url" }).select("id")); savedAttachments.push(...(data ?? [])); }
   // Existing completed jobs must not be reset to "대기" every day. New and stale
   // jobs are published to Vercel Queue by the batch coordinator instead.
-  for (const part of chunk(savedAttachments.map((row) => ({ attachment_id: row.id, status: "대기", failure_reason: null, updated_at: now })), 25)) { if (!part.length) continue; const { error } = await retry(() => admin.from("processing_jobs").upsert(part, { onConflict: "attachment_id", ignoreDuplicates: true })); if (error) throw error; }
+  for (const part of chunk(savedAttachments.map((row) => ({ attachment_id: row.id, status: "대기", failure_reason: null, updated_at: now })), 25)) { if (!part.length) continue; await retryQuery(() => admin.from("processing_jobs").upsert(part, { onConflict: "attachment_id", ignoreDuplicates: true }).select()); }
   return { discovered: validNotices.length, changed: validNotices.filter((notice) => notice.status === "정정" || notice.status === "재공고").length, missingDeadline: notices.length - validNotices.length, noticeIds: savedRows.map((row) => String(row.id)) };
 }
