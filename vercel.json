@@ -14,9 +14,6 @@
       "experimentalTriggers": [
         { "type": "queue/v2beta", "topic": "bidfit-notice-ai", "retryAfterSeconds": 60, "initialDelaySeconds": 0 }
       ]
-    },
-    "api/hwp-extract.py": {
-      "maxDuration": 60
     }
   }
 }
