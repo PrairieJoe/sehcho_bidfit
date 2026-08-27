@@ -9,7 +9,9 @@ function extensionOf(name: string) { return name.split("?")[0].split(".").pop()?
 function cleanXml(value: string) { return value.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim(); }
 
 async function extractLegacyHwp(attachment: Attachment): Promise<Attachment> {
-  const base = process.env.HWP_EXTRACTOR_URL ?? (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}/api/hwp-extract` : "");
+  // Deployment-specific VERCEL_URL values can be Vercel-protected. Use the
+  // public production origin unless an explicit private extractor URL exists.
+  const base = process.env.HWP_EXTRACTOR_URL ?? `${process.env.SITE_URL ?? "https://sehcho-bidfit.vercel.app"}/api/hwp-extract`;
   const secret = process.env.CRON_SECRET;
   if (!base || !secret) return { ...attachment, status: "보류", failureReason: "구형 HWP 추출기 설정이 없어 분석에서 제외했습니다." };
   // Vercel's proxy can consume custom authentication headers while routing a
