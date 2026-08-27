@@ -14,7 +14,9 @@ const noticeOf = (row: Row, state?: Row): BidNotice => {
 };
 const runOf = (row: Row): BatchRun => ({ id: String(row.id), startedAt: String(row.started_at), completedAt: row.completed_at ? String(row.completed_at) : undefined, status: String(row.status) as BatchRun["status"], discovered: Number(row.discovered), changed: Number(row.changed), analyzed: Number(row.analyzed), notified: Number(row.notified), apiCalls: Number(row.api_calls), errorSummary: String(row.error_summary ?? "") || undefined });
 async function latestCompletedRunStart(admin: ReturnType<typeof createSupabaseAdminClient>) {
-  const { data } = await admin.from("batch_runs").select("started_at").eq("status", "완료").order("started_at", { ascending: false }).limit(1).maybeSingle();
+  const { data: active } = await admin.from("batch_runs").select("started_at").in("status", ["실행 중", "분석 중"]).order("started_at", { ascending: false }).limit(1).maybeSingle();
+  if (active?.started_at) return String(active.started_at);
+  const { data } = await admin.from("batch_runs").select("started_at").in("status", ["완료", "부분 완료"]).order("started_at", { ascending: false }).limit(1).maybeSingle();
   return data?.started_at ? String(data.started_at) : undefined;
 }
 
