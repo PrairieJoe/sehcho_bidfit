@@ -57,7 +57,7 @@ export async function enqueuePendingAttachmentJobs(limit = 200) {
 }
 
 /** Safety net for deployments where the hosted queue consumer is delayed. */
-export async function processPendingAttachmentJobsInline(limit = 40) {
+export async function processPendingAttachmentJobsInline(limit = 40, publishAiQueue = true) {
   const admin = createSupabaseAdminClient();
   const { data, error } = await admin.from("processing_jobs").select("id").eq("status", "대기").order("created_at", { ascending: true }).limit(limit);
   if (error) throw error;
@@ -65,7 +65,7 @@ export async function processPendingAttachmentJobsInline(limit = 40) {
   for (let index = 0; index < (data ?? []).length; index += 8) {
     const group = (data ?? []).slice(index, index + 8);
     const results = await Promise.all(group.map(async (row) => {
-      try { await processQueuedAttachmentJob(String(row.id)); return 1; } catch { return 0; }
+      try { await processQueuedAttachmentJob(String(row.id), { publishAiQueue }); return 1; } catch { return 0; }
     }));
     processed += results.reduce<number>((sum, value) => sum + value, 0);
   }
@@ -73,7 +73,7 @@ export async function processPendingAttachmentJobsInline(limit = 40) {
 }
 
 /** Runs in an isolated Queue consumer invocation for exactly one attachment. */
-export async function processQueuedAttachmentJob(jobId: string) {
+export async function processQueuedAttachmentJob(jobId: string, options: { publishAiQueue?: boolean } = {}) {
   const admin = createSupabaseAdminClient();
   const { data: job, error } = await admin.from("processing_jobs").select("*, attachments(*)").eq("id", jobId).maybeSingle();
   if (error) throw error;
@@ -93,7 +93,7 @@ export async function processQueuedAttachmentJob(jobId: string) {
   if (processed.extractedText) await admin.from("attachment_texts").upsert({ attachment_id: attachment.id, extracted_text: processed.extractedText, page_map: [], extractor_version: "temporary-text-v1" });
   const terminal = processed.status === "분석 완료" || processed.status === "부분 분석" || processed.status === "보류";
   await admin.from("processing_jobs").update({ status: terminal ? "완료" : "실패", failure_reason: processed.failureReason ?? null, updated_at: new Date().toISOString() }).eq("id", jobId);
-  const ai = await enqueueNoticeAiWhenReady(String(attachment.notice_id));
+  const ai = await enqueueNoticeAiWhenReady(String(attachment.notice_id), 0, options.publishAiQueue ?? true);
   await finishActiveBatchIfDrained();
   return { skipped: false, attachmentStatus: processed.status, aiQueued: ai.queued };
 }

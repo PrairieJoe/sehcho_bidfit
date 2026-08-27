@@ -2,7 +2,7 @@ import type { AnalysisResult, BidNotice, Evidence, Topic } from "@/lib/types";
 
 // Flash-Lite keeps the daily batch economical while still returning structured Korean analysis.
 // Google currently lists this as the supported replacement for retired 2.x Flash-Lite.
-const MODEL = process.env.GEMINI_MODEL ?? "gemini-3.1-flash-lite";
+const MODEL = process.env.GEMINI_MODEL ?? "gemini-2.5-flash-lite";
 const MAX_INPUT_CHARS = 30_000;
 const MAX_OUTPUT_TOKENS = 700;
 

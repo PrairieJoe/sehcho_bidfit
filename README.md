@@ -35,9 +35,13 @@ Vercel 프로젝트의 `Settings → Environment Variables`에서 `Production` �
 
 ## 배치
 
-`vercel.json`의 Cron은 `0 23 * * *`(UTC)이며 한국 시간 오전 8시 전후 실행을 목표로 합니다. Vercel Hobby Cron은 정확한 분 단위 실행을 보장하지 않습니다. 관리자 운영 화면에서는 같은 배치를 수동 실행할 수 있습니다.
+정기 배치는 GitHub Actions의 `.github/workflows/daily-batch.yml`이 `0 23 * * *`(UTC), 한국 시간 오전 8시에 실행합니다. Actions는 Vercel 함수 시간 제한 없이 작업을 끝까지 수행합니다. `workflow_dispatch`로 실패한 배치를 수동 재시도할 수 있으며, Vercel은 공개 웹 화면과 관리자 설정만 제공합니다.
 
 배치는 최근 72시간 공고를 물품·용역·공사·외자 유형으로 조회하고, `입찰공고번호 + 공고차수`로 중복을 제거합니다. 첨부파일별 큐 작업에서 PDF·HWP·HWPX의 텍스트만 추출합니다. 모든 첨부 작업이 끝나면 공고당 한 번 Gemini에 정제 텍스트를 전송합니다. 성공하면 원본 파일은 저장하지 않고, Supabase의 임시 추출 텍스트도 즉시 삭제하며 점수·요약·AI 생성 근거만 남깁니다.
+
+### GitHub Actions 설정
+
+저장소 `Settings → Secrets and variables → Actions`에 `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `NARAJANGTEO_SERVICE_KEY`, `GEMINI_API_KEY`를 Secrets로 등록합니다. 필요하면 Variables에 `GEMINI_MODEL`을 등록하며 기본값은 `gemini-2.5-flash-lite`입니다. 첫 실행은 Actions 탭의 `Run workflow`로 검증하고 이후 매일 자동 실행됩니다.
 
 스캔 PDF·이미지·표·도면은 분석 범위에 포함하지 않습니다. 텍스트를 추출하지 못한 파일은 분석 제외 사유만 기록합니다. Gemini Free Tier는 요청·토큰 한도가 변동될 수 있으므로, 배포 전에 Google AI Studio의 프로젝트별 Rate limit을 확인해야 합니다.
 

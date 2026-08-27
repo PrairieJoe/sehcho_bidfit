@@ -12,7 +12,7 @@ export type NoticeAiQueueMessage = { aiJobId: string };
 const topicOf = (row: Row): Topic => ({ id: String(row.id), name: String(row.name), description: String(row.description ?? ""), capabilities: String(row.capabilities ?? ""), includeKeywords: list(row.include_keywords), excludeKeywords: list(row.exclude_keywords), businessTypes: list(row.business_types) as Topic["businessTypes"], regions: list(row.regions), minBudget: row.min_budget == null ? null : Number(row.min_budget), maxBudget: row.max_budget == null ? null : Number(row.max_budget), minimumDays: Number(row.minimum_days ?? 0), threshold: Number(row.threshold ?? 70) });
 const noticeOf = (row: Row): BidNotice => ({ id: String(row.id), bidNumber: String(row.bid_number), order: String(row.bid_order), title: String(row.title), businessType: String(row.business_type) as BidNotice["businessType"], status: String(row.status) as BidNotice["status"], agency: String(row.agency), demandAgency: String(row.demand_agency), region: String(row.region), publishedAt: String(row.published_at ?? ""), closesAt: String(row.closes_at ?? ""), budget: row.budget == null ? null : Number(row.budget), budgetLabel: String(row.budget_label), contractMethod: String(row.contract_method), detailUrl: String(row.detail_url), description: String(row.description), tasks: list(row.tasks), qualifications: list(row.qualifications), attachments: (row.attachments ?? []).map((item: Row) => ({ id: String(item.id), name: String(item.name), kind: String(item.kind), status: String(item.status) as BidNotice["attachments"][number]["status"], extractedText: String((Array.isArray(item.attachment_texts) ? item.attachment_texts[0] : item.attachment_texts)?.extracted_text ?? "") || undefined })), reviewState: "검토 전" });
 
-export async function enqueueNoticeAiWhenReady(noticeId: string, delaySeconds = 0) {
+export async function enqueueNoticeAiWhenReady(noticeId: string, delaySeconds = 0, publish = true) {
   // A missing key must never silently produce a keyword-based score.
   if (!process.env.GEMINI_API_KEY) return { queued: false, reason: "Gemini API 키가 설정되지 않았습니다." };
   const admin = createSupabaseAdminClient();
@@ -26,12 +26,12 @@ export async function enqueueNoticeAiWhenReady(noticeId: string, delaySeconds = 
   if (jobError) throw jobError;
   const job = inserted ?? (await admin.from("notice_ai_jobs").select("id,status").eq("notice_id", noticeId).eq("input_hash", inputHash).maybeSingle()).data;
   if (!job || job.status === "완료") return { queued: false };
-  await send<NoticeAiQueueMessage>(NOTICE_AI_QUEUE_TOPIC, { aiJobId: String(job.id) }, { idempotencyKey: `${noticeId}:${inputHash}`, retentionSeconds: 86_400, delaySeconds });
+  if (publish) await send<NoticeAiQueueMessage>(NOTICE_AI_QUEUE_TOPIC, { aiJobId: String(job.id) }, { idempotencyKey: `${noticeId}:${inputHash}`, retentionSeconds: 86_400, delaySeconds });
   return { queued: true };
 }
 
 /** Enqueues old, already-extracted notices after an AI key or model is newly configured. */
-export async function enqueueReadyNoticeAiJobs() {
+export async function enqueueReadyNoticeAiJobs(options: { publish?: boolean } = {}) {
   const admin = createSupabaseAdminClient();
   // Publish a bounded slice per daily run. Queue retention keeps the rest for
   // the next run; scanning and sending hundreds of messages serially can make
@@ -44,7 +44,7 @@ export async function enqueueReadyNoticeAiJobs() {
   // delay per notice made the tail of a recovery run take tens of minutes.
   for (let index = 0; index < noticeIds.length; index += 8) {
     const group = noticeIds.slice(index, index + 8);
-    const results = await Promise.all(group.map((noticeId) => enqueueNoticeAiWhenReady(noticeId).catch(() => ({ queued: false }))));
+    const results = await Promise.all(group.map((noticeId) => enqueueNoticeAiWhenReady(noticeId, 0, options.publish ?? true).catch(() => ({ queued: false }))));
     aiQueued += results.filter((result) => result.queued).length;
   }
   return { aiQueued };
