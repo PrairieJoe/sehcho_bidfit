@@ -23,7 +23,9 @@ export async function runCollectionPass() {
   const idByKey = new Map(savedRows.map((row) => [`${row.bid_number}-${row.bid_order}`, String(row.id)]));
   const versions = validNotices.map((notice) => ({ notice_id: idByKey.get(`${notice.bidNumber}-${notice.order}`), source_hash: JSON.stringify([notice.title, notice.closesAt, notice.status, notice.description]), source_payload: notice }));
   for (const part of chunk(versions.filter((row) => row.notice_id), 50)) { const { error } = await admin.from("notice_versions").upsert(part, { onConflict: "notice_id,source_hash" }); if (error) throw error; }
-  const attachments = validNotices.flatMap((notice) => notice.attachments.slice(0, 3).map((attachment) => ({ notice_id: idByKey.get(`${notice.bidNumber}-${notice.order}`), source_url: attachment.sourceUrl ?? `unavailable:${attachment.id}`, name: attachment.name, kind: attachment.kind, status: attachment.status }))).filter((row) => row.notice_id);
+  // Do not overwrite an already processed attachment with the source's initial
+  // `대기` status on every overlapping 72-hour collection run.
+  const attachments = validNotices.flatMap((notice) => notice.attachments.slice(0, 3).map((attachment) => ({ notice_id: idByKey.get(`${notice.bidNumber}-${notice.order}`), source_url: attachment.sourceUrl ?? `unavailable:${attachment.id}`, name: attachment.name, kind: attachment.kind }))).filter((row) => row.notice_id);
   const savedAttachments: Record<string, any>[] = [];
   for (const part of chunk(attachments, 50)) { if (!part.length) continue; const { data, error } = await admin.from("attachments").upsert(part, { onConflict: "notice_id,source_url" }).select("id"); if (error) throw error; savedAttachments.push(...(data ?? [])); }
   // Existing completed jobs must not be reset to "대기" every day. New and stale
