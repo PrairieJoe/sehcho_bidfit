@@ -2,7 +2,7 @@ import { getBidSource } from "@/lib/sources";
 import { createSupabaseAdminClient } from "@/lib/supabase";
 
 const chunk = <T,>(items: T[], size: number) => Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, (index + 1) * size));
-async function retryQuery<T>(operation: () => Promise<{ data: T; error: { message?: string } | null }>, attempts = 3) {
+async function retryQuery<T>(operation: () => Promise<{ data: T | null; error: { message?: string } | null }>, attempts = 3) {
   let last: unknown;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
