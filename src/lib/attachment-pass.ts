@@ -9,18 +9,43 @@ type Row = Record<string, any>;
 export const ATTACHMENT_QUEUE_TOPIC = "bidfit-attachment";
 export type AttachmentQueueMessage = { jobId: string };
 
+/**
+ * Early queue implementations could mark the job terminal before persisting
+ * the attachment result. Recover only that inconsistent legacy state so it is
+ * retried by the current extractor instead of remaining visibly pending.
+ */
+async function recoverPendingAttachmentsWithTerminalJobs() {
+  const admin = createSupabaseAdminClient();
+  const { data, error } = await admin
+    .from("processing_jobs")
+    .select("id, attachments!inner(status)")
+    .in("status", ["완료", "실패"])
+    .eq("attachments.status", "대기")
+    .limit(1_000);
+  if (error) throw error;
+  const ids = (data ?? []).map((job: Row) => String(job.id));
+  if (!ids.length) return 0;
+  const { error: updateError } = await admin
+    .from("processing_jobs")
+    .update({ status: "대기", failure_reason: null, updated_at: new Date().toISOString() })
+    .in("id", ids);
+  if (updateError) throw updateError;
+  return ids.length;
+}
+
 /** Publishes one durable queue message per unprocessed attachment. */
 export async function enqueuePendingAttachmentJobs() {
   const admin = createSupabaseAdminClient();
   const staleBefore = new Date(Date.now() - 10 * 60_000).toISOString();
   await admin.from("processing_jobs").update({ status: "대기", updated_at: new Date().toISOString() }).eq("status", "처리 중").lt("updated_at", staleBefore);
-  const { data: jobs, error } = await admin.from("processing_jobs").select("id").in("status", ["대기", "처리 중"]).order("created_at", { ascending: true }).limit(1000);
+  const recovered = await recoverPendingAttachmentsWithTerminalJobs();
+  const { data: jobs, error } = await admin.from("processing_jobs").select("id,attempts").in("status", ["대기", "처리 중"]).order("created_at", { ascending: true }).limit(1000);
   if (error) throw error;
   const rows = jobs ?? [];
   for (let index = 0; index < rows.length; index += 25) {
-    await Promise.all(rows.slice(index, index + 25).map((job: Row) => send<AttachmentQueueMessage>(ATTACHMENT_QUEUE_TOPIC, { jobId: String(job.id) }, { idempotencyKey: String(job.id), retentionSeconds: 86_400 })));
+    await Promise.all(rows.slice(index, index + 25).map((job: Row) => send<AttachmentQueueMessage>(ATTACHMENT_QUEUE_TOPIC, { jobId: String(job.id) }, { idempotencyKey: `${String(job.id)}:${Number(job.attempts ?? 0)}`, retentionSeconds: 86_400 })));
   }
-  return { attachmentQueued: rows.length };
+  return { attachmentQueued: rows.length, recovered };
 }
 
 /** Runs in an isolated Queue consumer invocation for exactly one attachment. */
