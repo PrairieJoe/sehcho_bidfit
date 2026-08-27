@@ -44,14 +44,16 @@ export async function enqueueNoticeAiWhenReady(noticeId: string, delaySeconds = 
 }
 
 /** Enqueues old, already-extracted notices after an AI key or model is newly configured. */
-export async function enqueueReadyNoticeAiJobs(options: { publish?: boolean } = {}) {
+export async function enqueueReadyNoticeAiJobs(options: { publish?: boolean; noticeIds?: string[] } = {}) {
   const admin = createSupabaseAdminClient();
   // Analyze every collected notice. Attachment-backed notices wait until all
   // supported files have extracted text; notices without attachments use the
   // explicit title/description fallback in analyzeWithGemini. The previous
   // attachment-only scan silently excluded no-attachment notices and made the
   // dashboard report a misleading zero.
-  const { data, error } = await admin.from("notices").select("id,attachments(id,status,attachment_texts(extracted_text))").order("updated_at", { ascending: false }).limit(5_000);
+  let query = admin.from("notices").select("id,attachments(id,status,attachment_texts(extracted_text))").order("updated_at", { ascending: false }).limit(5_000);
+  if (options.noticeIds?.length) query = query.in("id", options.noticeIds);
+  const { data, error } = await query;
   if (error) throw error;
   const noticeIds = (data ?? []).filter((row: Row) => {
     const attachments = Array.isArray(row.attachments) ? row.attachments : [];

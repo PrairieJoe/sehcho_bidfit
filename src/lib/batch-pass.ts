@@ -55,12 +55,16 @@ export async function runGithubActionsBatch() {
     await ensureDefaultTopic();
     const collection = await runCollectionPass();
     await admin.from("batch_runs").update({ status: "분석 중", discovered: collection.discovered, changed: collection.changed, api_calls: 1 }).eq("id", started.id);
+    // Register no-attachment notices once. Attachment-backed notices enqueue
+    // their AI job from processQueuedAttachmentJob as soon as the final file
+    // becomes ready; rescanning every notice on every cycle caused a large
+    // Supabase round-trip bottleneck.
+    await enqueueReadyNoticeAiJobs({ publish: false, noticeIds: collection.noticeIds });
     let attachmentProcessed = 0;
     let aiProcessed = 0;
     for (let cycle = 0; cycle < 1_000; cycle += 1) {
       console.log(`[Batch] cycle=${cycle + 1} attachmentProcessed=${attachmentProcessed} aiProcessed=${aiProcessed}`);
       attachmentProcessed += await processPendingAttachmentJobsInline(40, false);
-      await enqueueReadyNoticeAiJobs({ publish: false });
       aiProcessed += await processPendingNoticeAiJobsInline(4);
       const [{ count: pendingAttachments }, { count: pendingAi }] = await Promise.all([
         admin.from("processing_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]),
