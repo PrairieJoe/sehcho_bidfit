@@ -22,10 +22,11 @@ export async function runDailyBatch() {
   try {
     await ensureDefaultTopic();
     const collection = await runCollectionPass();
-    const queue = await enqueuePendingAttachmentJobs();
-    const inlineProcessed = await processPendingAttachmentJobsInline(40);
+    await admin.from("batch_runs").update({ status: "분석 중", discovered: collection.discovered, changed: collection.changed, api_calls: 4 }).eq("id", started.id);
+    const queue = await enqueuePendingAttachmentJobs(200);
+    const inlineProcessed = await processPendingAttachmentJobsInline(16);
     const aiQueue = await enqueueReadyNoticeAiJobs();
-    const inlineAiProcessed = await processPendingNoticeAiJobsInline(32);
+    const inlineAiProcessed = await processPendingNoticeAiJobsInline(8);
     const result = { ...collection, ...queue, ...aiQueue, inlineProcessed, inlineAiProcessed, analyzed: inlineAiProcessed };
     const { error: finishError } = await admin.from("batch_runs").update({
       status: queue.attachmentQueued || aiQueue.aiQueued ? "분석 중" : "완료", completed_at: queue.attachmentQueued || aiQueue.aiQueued ? null : new Date().toISOString(), discovered: result.discovered,
