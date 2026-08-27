@@ -11,7 +11,6 @@ const money = (value: number | null) => value ? `${(value / 100_000_000).toFixed
 const time = (value: string) => value && !Number.isNaN(new Date(value).getTime()) ? new Intl.DateTimeFormat("ko-KR", { month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value)) : "확인 필요";
 const daysLeft = (value: string) => value && !Number.isNaN(new Date(value).getTime()) ? Math.ceil((new Date(value).getTime() - Date.now()) / 86_400_000) : 0;
 const scoreTone = (score: number) => score >= 85 ? "score-excellent" : score >= 70 ? "score-high" : score >= 50 ? "score-medium" : "score-low";
-const isTitleCandidate = (notice: BidNotice, topic: Topic) => topic.includeKeywords.some((keyword) => notice.title.toLowerCase().replace(/\s/g, "").includes(keyword.toLowerCase().replace(/\s/g, "")));
 const pendingAnalysis: AnalysisResult = { score: 0, grade: "낮음", confidence: "낮음", eligibilityStatus: "확인 필요", summary: "아직 분석 결과가 생성되지 않았습니다.", components: [], positiveReasons: [], penalties: [], uncertainties: ["이번 수집분에서 첨부문서 키워드 근거가 확보되면 결과가 표시됩니다."] };
 
 export function Dashboard({ initialNotices, initialTopic, initialNotifications, initialRuns, userEmail, isAdmin }: Props) {
@@ -27,7 +26,6 @@ export function Dashboard({ initialNotices, initialTopic, initialNotifications, 
   // 수집 원본은 운영 지표에만 사용한다. 관리자도 결과 화면에서는
   // 첨부 근거까지 확보되어 분석이 완료된 공고만 확인한다.
   const visibleNotices = notices.filter((notice) => notice.analysis);
-  const candidatePendingCount = notices.filter((notice) => !notice.analysis && isTitleCandidate(notice, topic)).length;
 
   const filtered = useMemo(() => notices
     .filter((notice) => typeFilter === "전체" || notice.businessType === typeFilter)
@@ -73,7 +71,7 @@ export function Dashboard({ initialNotices, initialTopic, initialNotifications, 
 
       <section className="content">
         <header className="topbar"><button className="icon-button mobile-menu" aria-label="메뉴"><Menu size={20} /></button><div className="crumb">나라장터 입찰공고 <ChevronRight size={15} /> <strong>{tab === "dashboard" ? "오늘의 분석" : tab === "notices" ? "전체 공고" : tab === "operations" ? "운영 현황" : "전체 공고"}</strong></div><div className="topbar-right"><span className="data-pill"><span className="live-dot" />나라장터 연계</span></div></header>
-        {tab === "dashboard" && <Overview notices={visibleNotices} pendingCount={candidatePendingCount} eligible={eligible} topic={topic} onOpen={setSelected} onShowAll={() => setTab("notices")} isAdmin={isAdmin} latestRun={runs[0]} />}
+        {tab === "dashboard" && <Overview notices={visibleNotices} eligible={eligible} topic={topic} onOpen={setSelected} onShowAll={() => setTab("notices")} isAdmin={isAdmin} latestRun={runs[0]} />}
         {tab === "notices" && <NoticeList notices={filtered} query={query} typeFilter={typeFilter} onQuery={setQuery} onType={setTypeFilter} onOpen={setSelected} />}
         {tab === "operations" && isAdmin && <Operations runs={runs} notices={notices} />}
       </section>
@@ -87,10 +85,9 @@ function NavItem({ active, icon, label, badge, onClick }: { active: boolean; ico
   return <button className={`nav-item ${active ? "active" : ""}`} onClick={onClick}>{icon}<span>{label}</span>{badge && <em>{badge}</em>}</button>;
 }
 
-function Overview({ notices, pendingCount = 0, eligible, topic, onOpen, onShowAll, isAdmin, latestRun }: { notices: BidNotice[]; pendingCount?: number; eligible: BidNotice[]; topic: Topic; onOpen: (notice: BidNotice) => void; onShowAll: () => void; isAdmin: boolean; latestRun?: BatchRun }) {
+function Overview({ notices, eligible, topic, onOpen, onShowAll, isAdmin, latestRun }: { notices: BidNotice[]; eligible: BidNotice[]; topic: Topic; onOpen: (notice: BidNotice) => void; onShowAll: () => void; isAdmin: boolean; latestRun?: BatchRun }) {
   const high = notices.filter((item) => (item.analysis?.score ?? 0) >= 85).length;
-  const analyzed = notices.filter((item) => item.analysis).length;
-  const pending = pendingCount;
+  const analyzed = latestRun?.analyzed ?? notices.filter((item) => item.analysis).length;
   const changed = notices.filter((item) => item.status === "정정" || item.status === "재공고").length;
   const isRunning = latestRun?.status === "실행 중" || latestRun?.status === "분석 중";
   const isPartial = latestRun?.status === "부분 완료";
@@ -100,10 +97,10 @@ function Overview({ notices, pendingCount = 0, eligible, topic, onOpen, onShowAl
       ? `오늘 ${time(latestRun.startedAt)}부터 공고를 수집하고 첨부문서를 분석하고 있습니다. 현재 배치에서 분석이 끝난 공고만 표시합니다.`
       : isPartial
         ? `오늘 업데이트가 끝까지 완료되지 않았습니다. ${latestRun.errorSummary ? `사유: ${latestRun.errorSummary}` : "마지막 정상 결과를 유지합니다."}`
-        : latestRun.analyzed > 0
-          ? `오늘 ${time(latestRun.completedAt ?? latestRun.startedAt)} 업데이트가 완료되었습니다. ${latestRun.discovered}건을 수집하고 ${latestRun.analyzed}건의 분석 결과를 만들었습니다.`
+          : latestRun.analyzed > 0
+          ? `오늘 ${time(latestRun.completedAt ?? latestRun.startedAt)} 업데이트가 완료되었습니다. ${latestRun.discovered}건을 수집하고 ${latestRun.analyzed}건의 첨부문서·공고 내용 분석을 완료했습니다.`
           : latestRun.discovered > 0
-            ? `오늘 ${time(latestRun.completedAt ?? latestRun.startedAt)} ${latestRun.discovered}건을 확인했지만, 설정한 주제와 제목이 맞는 공고가 없어 첨부문서 분석 대상이 없었습니다.`
+            ? `오늘 ${time(latestRun.completedAt ?? latestRun.startedAt)} ${latestRun.discovered}건을 수집했습니다. 첨부문서 분석 결과가 아직 없어 점수를 표시하지 않습니다.`
             : "오늘 나라장터에서 새로 확인할 공고가 없었습니다.";
   return <div className="page-content">
     <section className="title-row"><div><p className="eyebrow">매일 08:00~09:00 KST 정기 업데이트</p><h1>오늘의 입찰 기회</h1><p className="lede"><strong>{topic.name}</strong>와 관련된 공고만 분석 완료 후 보여드립니다.</p></div></section>
