@@ -56,6 +56,18 @@ export async function enqueuePendingAttachmentJobs() {
   return { attachmentQueued: rows.length, recovered };
 }
 
+/** Safety net for deployments where the hosted queue consumer is delayed. */
+export async function processPendingAttachmentJobsInline(limit = 8) {
+  const admin = createSupabaseAdminClient();
+  const { data, error } = await admin.from("processing_jobs").select("id").eq("status", "대기").order("created_at", { ascending: true }).limit(limit);
+  if (error) throw error;
+  let processed = 0;
+  for (const row of data ?? []) {
+    try { await processQueuedAttachmentJob(String(row.id)); processed += 1; } catch { /* job is marked failed by the consumer */ }
+  }
+  return processed;
+}
+
 /** Runs in an isolated Queue consumer invocation for exactly one attachment. */
 export async function processQueuedAttachmentJob(jobId: string) {
   const admin = createSupabaseAdminClient();

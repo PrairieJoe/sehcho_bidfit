@@ -1,4 +1,4 @@
-import { enqueuePendingAttachmentJobs } from "@/lib/attachment-pass";
+import { enqueuePendingAttachmentJobs, processPendingAttachmentJobsInline } from "@/lib/attachment-pass";
 import { runCollectionPass } from "@/lib/collection-pass";
 import { enqueueReadyNoticeAiJobs } from "@/lib/notice-ai-pass";
 import { ensureDefaultTopic } from "@/lib/repository";
@@ -14,8 +14,9 @@ export async function runDailyBatch() {
     await ensureDefaultTopic();
     const collection = await runCollectionPass();
     const queue = await enqueuePendingAttachmentJobs();
+    const inlineProcessed = await processPendingAttachmentJobsInline(8);
     const aiQueue = await enqueueReadyNoticeAiJobs();
-    const result = { ...collection, ...queue, ...aiQueue, analyzed: 0 };
+    const result = { ...collection, ...queue, ...aiQueue, inlineProcessed, analyzed: 0 };
     const { error: finishError } = await admin.from("batch_runs").update({
       status: queue.attachmentQueued || aiQueue.aiQueued ? "분석 중" : "완료", completed_at: queue.attachmentQueued || aiQueue.aiQueued ? null : new Date().toISOString(), discovered: result.discovered,
       changed: result.changed, analyzed: result.analyzed, api_calls: 4,
