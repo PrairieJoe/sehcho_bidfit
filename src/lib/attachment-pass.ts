@@ -1,4 +1,4 @@
-import { send } from "@vercel/queue";
+import { QueueClient } from "@vercel/queue";
 import { createHash } from "node:crypto";
 import { processAttachment } from "@/lib/attachment-processing";
 import { enqueueNoticeAiWhenReady } from "@/lib/notice-ai-pass";
@@ -8,6 +8,9 @@ import type { Attachment } from "@/lib/types";
 type Row = Record<string, any>;
 export const ATTACHMENT_QUEUE_TOPIC = "bidfit-attachment";
 export type AttachmentQueueMessage = { jobId: string };
+// Do not pin recovery messages to an older deployment: a new extractor must
+// always be consumed by the current Production route after a deployment.
+const attachmentQueue = new QueueClient({ deploymentId: null });
 
 /**
  * Early queue implementations could mark the job terminal before persisting
@@ -48,7 +51,7 @@ export async function enqueuePendingAttachmentJobs() {
   if (error) throw error;
   const rows = jobs ?? [];
   for (let index = 0; index < rows.length; index += 25) {
-    await Promise.all(rows.slice(index, index + 25).map((job: Row) => send<AttachmentQueueMessage>(ATTACHMENT_QUEUE_TOPIC, { jobId: String(job.id) }, { idempotencyKey: `${String(job.id)}:${Number(job.attempts ?? 0)}`, retentionSeconds: 86_400 })));
+    await Promise.all(rows.slice(index, index + 25).map((job: Row) => attachmentQueue.send<AttachmentQueueMessage>(ATTACHMENT_QUEUE_TOPIC, { jobId: String(job.id) }, { idempotencyKey: `extractor-v2:${String(job.id)}:${Number(job.attempts ?? 0)}`, retentionSeconds: 86_400 })));
   }
   return { attachmentQueued: rows.length, recovered };
 }
