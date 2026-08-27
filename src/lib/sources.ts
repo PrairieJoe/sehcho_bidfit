@@ -69,6 +69,8 @@ export class NarajangteoBidSource implements BidSource {
       if (!body) throw new Error(`나라장터 ${businessType} API 응답 형식 오류`);
       const items = Array.isArray(raw) ? raw : raw ? [raw] : [];
       diagnostics.push(`${businessType}: code=${String(header?.resultCode ?? "00")}, total=${String(body.totalCount ?? 0)}, items=${items.length}`);
+      const attachmentFieldCount = items.filter((entry) => attachmentsOf(entry, `${value(entry, "bidNtceNo", "bidNtceNoInfo")}-${value(entry, "bidNtceOrd", "bidNtceOrdNo") || "000"}`).length > 0).length;
+      console.log(`[Nara] ${businessType} 목록 ${items.length}건 중 첨부 필드 확인 ${attachmentFieldCount}건`);
       notices.push(...items.map((entry) => normalizeItem(entry, businessType)).filter((entry): entry is BidNotice => Boolean(entry)));
       if (items.length < 20 || pageNo * 20 >= Number(payload.response?.body?.totalCount ?? 0)) break;
       }
