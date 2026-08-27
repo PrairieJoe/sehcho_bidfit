@@ -59,11 +59,13 @@ export async function processQueuedAttachmentJob(jobId: string) {
   const { data: job, error } = await admin.from("processing_jobs").select("*, attachments(*)").eq("id", jobId).maybeSingle();
   if (error) throw error;
   if (!job) return { skipped: true, reason: "작업을 찾을 수 없습니다." };
-  if (job.status === "완료" || job.status === "보류") return { skipped: true, reason: "이미 처리된 작업입니다." };
+  if (job.status === "완료" || job.status === "보류" || job.status === "처리 중") return { skipped: true, reason: "이미 처리된 작업입니다." };
   const attachment = job.attachments as Row | undefined;
   if (!attachment) throw new Error("첨부파일 정보를 찾을 수 없습니다.");
 
-  await admin.from("processing_jobs").update({ status: "처리 중", attempts: Number(job.attempts) + 1, updated_at: new Date().toISOString() }).eq("id", jobId);
+  const { data: claimed, error: claimError } = await admin.from("processing_jobs").update({ status: "처리 중", attempts: Number(job.attempts) + 1, updated_at: new Date().toISOString() }).eq("id", jobId).in("status", ["대기", "실패"]).select("id").maybeSingle();
+  if (claimError) throw claimError;
+  if (!claimed) return { skipped: true, reason: "다른 작업자가 이미 처리 중입니다." };
   const processed = await processAttachment(String(attachment.notice_id), {
     id: String(attachment.id), name: String(attachment.name), kind: String(attachment.kind),
     status: String(attachment.status) as Attachment["status"], sourceUrl: String(attachment.source_url ?? ""),

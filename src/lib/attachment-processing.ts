@@ -15,7 +15,10 @@ async function extractLegacyHwp(attachment: Attachment): Promise<Attachment> {
   // Vercel's proxy can consume custom authentication headers while routing a
   // Python function. The value stays inside this server-to-server JSON body.
   const response = await fetch(base, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sourceUrl: attachment.sourceUrl, internalSecret: secret }), signal: AbortSignal.timeout(60_000) });
-  if (!response.ok) return { ...attachment, status: "추출 실패", failureReason: `구형 HWP 텍스트 추출 HTTP ${response.status}` };
+  if (!response.ok) {
+    const detail = await response.json().catch(() => null) as { error?: string } | null;
+    return { ...attachment, status: "추출 실패", failureReason: `구형 HWP 텍스트 추출 HTTP ${response.status}${detail?.error ? `: ${detail.error}` : ""}` };
+  }
   const result = await response.json() as { text?: string; pages?: number; error?: string };
   if (!result.text?.trim()) return { ...attachment, status: "부분 분석", pages: result.pages, failureReason: result.error ?? "구형 HWP에서 텍스트를 추출하지 못했습니다." };
   return { ...attachment, status: "분석 완료", pages: result.pages, extractedText: result.text.slice(0, MAX_EXTRACTED_TEXT_CHARS) };
