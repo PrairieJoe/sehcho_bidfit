@@ -31,4 +31,16 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm batch:daily
+      - name: Run collection and analysis with transient retry
+        run: |
+          last_status=1
+          for attempt in 1 2 3; do
+            echo "[workflow] batch attempt ${attempt}/3"
+            pnpm batch:daily && exit 0
+            last_status=$?
+            if [ "$attempt" -lt 3 ]; then
+              echo "[workflow] batch failed; retrying after 20 seconds"
+              sleep 20
+            fi
+          done
+          exit "$last_status"
