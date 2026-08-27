@@ -46,12 +46,17 @@ export async function enqueueNoticeAiWhenReady(noticeId: string, delaySeconds = 
 /** Enqueues old, already-extracted notices after an AI key or model is newly configured. */
 export async function enqueueReadyNoticeAiJobs(options: { publish?: boolean } = {}) {
   const admin = createSupabaseAdminClient();
-  // Publish a bounded slice per daily run. Queue retention keeps the rest for
-  // the next run; scanning and sending hundreds of messages serially can make
-  // the Vercel coordinator hit its execution limit.
-  const { data, error } = await admin.from("attachments").select("notice_id").eq("status", "분석 완료").limit(32);
+  // Analyze every collected notice. Attachment-backed notices wait until all
+  // supported files have extracted text; notices without attachments use the
+  // explicit title/description fallback in analyzeWithGemini. The previous
+  // attachment-only scan silently excluded no-attachment notices and made the
+  // dashboard report a misleading zero.
+  const { data, error } = await admin.from("notices").select("id,attachments(id,status,attachment_texts(extracted_text))").order("updated_at", { ascending: false }).limit(200);
   if (error) throw error;
-  const noticeIds = [...new Set((data ?? []).map((row: Row) => String(row.notice_id)))];
+  const noticeIds = (data ?? []).filter((row: Row) => {
+    const attachments = Array.isArray(row.attachments) ? row.attachments : [];
+    return attachments.length === 0 || attachments.every((item: Row) => item.status === "분석 완료" && String((Array.isArray(item.attachment_texts) ? item.attachment_texts[0] : item.attachment_texts)?.extracted_text ?? "").trim());
+  }).map((row: Row) => String(row.id));
   let aiQueued = 0;
   // Keep a small rolling concurrency window for the free Gemini tier. A linear
   // delay per notice made the tail of a recovery run take tens of minutes.
