@@ -15,13 +15,24 @@ const noticeOf = (row: Row, state?: Row, allowLegacyAnalysis = false): BidNotice
   // New analyses carry the source hash used for the batch. This prevents a
   // previous version's score from being shown for a corrected/reposted notice.
   const candidateHash = String((candidate as Row | undefined)?.sourceHash ?? "");
-  const analysis = candidate && ((allowLegacyAnalysis && !candidateHash) || candidateHash === String(row.source_hash ?? "")) ? candidate : undefined;
+  // During an active/failed run, the candidate belongs to the last published
+  // snapshot when its score was written before that run. The notice metadata
+  // may already have been refreshed, so requiring the new source hash here
+  // would incorrectly erase the previous public result.
+  const analysis = candidate && (allowLegacyAnalysis || candidateHash === String(row.source_hash ?? "")) ? candidate : undefined;
   return { id: String(row.id), bidNumber: String(row.bid_number), order: String(row.bid_order), title: String(row.title), businessType: String(row.business_type) as BidNotice["businessType"], status: String(row.status) as BidNotice["status"], agency: String(row.agency), demandAgency: String(row.demand_agency), region: String(row.region), publishedAt: String(row.published_at ?? ""), closesAt: String(row.closes_at ?? ""), budget: row.budget === null ? null : Number(row.budget), budgetLabel: String(row.budget_label), contractMethod: String(row.contract_method), detailUrl: String(row.detail_url), description: String(row.description), tasks: array(row.tasks), qualifications: array(row.qualifications), changeSummary: String(row.change_summary ?? "") || undefined, attachments, analysis, reviewState: state?.review_state as BidNotice["reviewState"] ?? "검토 전", memo: String(state?.memo ?? "") || undefined };
 };
 const runOf = (row: Row): BatchRun => ({ id: String(row.id), startedAt: String(row.started_at), completedAt: row.completed_at ? String(row.completed_at) : undefined, status: String(row.status) as BatchRun["status"], discovered: Number(row.discovered), changed: Number(row.changed), analyzed: Number(row.analyzed), notified: Number(row.notified), apiCalls: Number(row.api_calls), errorSummary: String(row.error_summary ?? "") || undefined });
 async function snapshotWindow(admin: ReturnType<typeof createSupabaseAdminClient>) {
   const { data: completed } = await admin.from("batch_runs").select("started_at").eq("status", "완료").order("started_at", { ascending: false }).limit(1).maybeSingle();
-  const { data: incomplete } = await admin.from("batch_runs").select("started_at").neq("status", "완료").order("started_at", { ascending: true }).limit(1).maybeSingle();
+  let incomplete: { started_at?: string } | null = null;
+  if (completed?.started_at) {
+    const { data } = await admin.from("batch_runs").select("started_at").neq("status", "완료").gt("started_at", String(completed.started_at)).order("started_at", { ascending: true }).limit(1).maybeSingle();
+    incomplete = data;
+  } else {
+    const { data } = await admin.from("batch_runs").select("started_at").neq("status", "완료").order("started_at", { ascending: true }).limit(1).maybeSingle();
+    incomplete = data;
+  }
   // A failed/partial run has already updated notice rows, so using the latest
   // completed timestamp alone would expose that incomplete snapshot. Keep the
   // data strictly before the first incomplete run after the last completion.
