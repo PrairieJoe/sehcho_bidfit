@@ -44,7 +44,7 @@ async function recoverPendingAttachmentsWithTerminalJobs() {
 /** Publishes one durable queue message per unprocessed attachment. */
 export async function enqueuePendingAttachmentJobs() {
   const admin = createSupabaseAdminClient();
-  const staleBefore = new Date(Date.now() - 10 * 60_000).toISOString();
+  const staleBefore = new Date(Date.now() - 60_000).toISOString();
   await admin.from("processing_jobs").update({ status: "대기", updated_at: new Date().toISOString() }).eq("status", "처리 중").lt("updated_at", staleBefore);
   const recovered = await recoverPendingAttachmentsWithTerminalJobs();
   const { data: jobs, error } = await admin.from("processing_jobs").select("id,attempts").in("status", ["대기", "처리 중"]).order("created_at", { ascending: true }).limit(1000);
@@ -57,13 +57,17 @@ export async function enqueuePendingAttachmentJobs() {
 }
 
 /** Safety net for deployments where the hosted queue consumer is delayed. */
-export async function processPendingAttachmentJobsInline(limit = 8) {
+export async function processPendingAttachmentJobsInline(limit = 40) {
   const admin = createSupabaseAdminClient();
   const { data, error } = await admin.from("processing_jobs").select("id").eq("status", "대기").order("created_at", { ascending: true }).limit(limit);
   if (error) throw error;
   let processed = 0;
-  for (const row of data ?? []) {
-    try { await processQueuedAttachmentJob(String(row.id)); processed += 1; } catch { /* job is marked failed by the consumer */ }
+  for (let index = 0; index < (data ?? []).length; index += 8) {
+    const group = (data ?? []).slice(index, index + 8);
+    const results = await Promise.all(group.map(async (row) => {
+      try { await processQueuedAttachmentJob(String(row.id)); return 1; } catch { return 0; }
+    }));
+    processed += results.reduce((sum, value) => sum + value, 0);
   }
   return processed;
 }

@@ -14,7 +14,7 @@ export async function runDailyBatch() {
     await ensureDefaultTopic();
     const collection = await runCollectionPass();
     const queue = await enqueuePendingAttachmentJobs();
-    const inlineProcessed = await processPendingAttachmentJobsInline(8);
+    const inlineProcessed = await processPendingAttachmentJobsInline(40);
     const aiQueue = await enqueueReadyNoticeAiJobs();
     const result = { ...collection, ...queue, ...aiQueue, inlineProcessed, analyzed: 0 };
     const { error: finishError } = await admin.from("batch_runs").update({
