@@ -8,7 +8,11 @@ import { createSupabaseAdminClient } from "@/lib/supabase";
 export async function runDailyBatch() {
   const admin = createSupabaseAdminClient();
   const { data: active } = await admin.from("batch_runs").select("id,started_at").in("status", ["실행 중", "분석 중"]).order("started_at", { ascending: false }).limit(1).maybeSingle();
-  if (active) throw new Error("이미 분석 중인 배치가 있습니다. 현재 작업이 끝난 뒤 다시 실행하세요.");
+  if (active) {
+    const age = Date.now() - new Date(String(active.started_at)).getTime();
+    if (age < 30 * 60_000) throw new Error("이미 분석 중인 배치가 있습니다. 현재 작업이 끝난 뒤 다시 실행하세요.");
+    await admin.from("batch_runs").update({ status: "부분 완료", completed_at: new Date().toISOString(), error_summary: "30분 이상 진행되지 않아 정체 배치로 종료했습니다." }).eq("id", active.id);
+  }
   await admin.from("batch_runs").update({ completed_at: new Date().toISOString(), status: "부분 완료", error_summary: "다음 일일 작업이 시작되어 이전 분석 대기 작업을 종료했습니다." }).in("status", ["실행 중", "분석 중"]);
   const { data: started, error: startError } = await admin.from("batch_runs").insert({}).select().single();
   if (startError || !started) throw startError ?? new Error("실행 이력을 만들 수 없습니다.");
