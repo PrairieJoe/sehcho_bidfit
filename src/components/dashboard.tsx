@@ -93,11 +93,11 @@ function Overview({ notices, eligible, topic, onOpen, onShowAll, isAdmin, latest
   const changed = notices.filter((item) => item.status === "정정" || item.status === "재공고").length;
   const isPartial = latestRun?.status === "부분 완료";
   const statusText = !latestRun
-    ? "첫 정기 업데이트를 기다리고 있습니다. 완료 전에는 공고 결과를 표시하지 않습니다."
+    ? "첫 정기 업데이트 전입니다. 결과가 준비되면 공고를 표시합니다."
     : isRunning
-      ? `오늘 ${time(latestRun.startedAt)}부터 공고를 수집하고 첨부문서를 분석하고 있습니다. ${previousCompleted ? "완료 전까지 이전 결과를 보여드립니다." : "첫 실행이라 분석 결과가 없습니다."}`
+      ? `${previousCompleted ? "새 결과를 준비하고 있습니다. 이전 결과를 표시합니다." : "첫 결과를 준비하고 있습니다. 완료되면 공고를 표시합니다."}`
       : isPartial
-        ? `오늘 업데이트가 끝까지 완료되지 않았습니다. ${latestRun.errorSummary ? `사유: ${latestRun.errorSummary}` : "마지막 정상 결과를 유지합니다."}`
+        ? `이번 업데이트를 끝까지 마치지 못했습니다. ${latestRun.errorSummary ? `사유: ${latestRun.errorSummary}` : "이전 결과를 표시합니다."}`
           : latestRun.analyzed > 0
           ? `오늘 ${time(latestRun.completedAt ?? latestRun.startedAt)} 업데이트가 완료되었습니다. ${latestRun.discovered}건을 수집하고 ${latestRun.analyzed}건의 첨부문서·공고 내용 분석을 완료했습니다.`
           : latestRun.discovered > 0

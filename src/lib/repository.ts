@@ -47,7 +47,10 @@ export class PublicRepository {
   async listNotices() {
     const topic = await this.getTopic();
     const window = await snapshotWindow(this.admin);
-    const { data, error } = await this.admin.from("notices").select("*, attachments(*), topic_scores!left(analysis, topic_id, updated_at)").order("closes_at");
+    // The public product scope is service procurements only. Keep this filter
+    // at the repository boundary as well as in the source adapter so legacy
+    // goods/construction rows can never leak into the public result.
+    const { data, error } = await this.admin.from("notices").select("*, attachments(*), topic_scores!left(analysis, topic_id, updated_at)").eq("business_type", "용역").order("closes_at");
     if (error) throw error;
     return (data ?? []).map((row: Row) => {
       // A collection pass updates notice.updated_at before analysis finishes.
