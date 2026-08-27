@@ -28,7 +28,9 @@ export async function runCollectionPass() {
     return { bid_number: notice.bidNumber, bid_order: notice.order, title: notice.title, business_type: notice.businessType, status: notice.status, agency: notice.agency, demand_agency: notice.demandAgency, region: notice.region, published_at: notice.publishedAt || null, closes_at: notice.closesAt || null, budget: notice.budget, budget_label: notice.budgetLabel, contract_method: notice.contractMethod, detail_url: notice.detailUrl, description: notice.description, tasks: notice.tasks, qualifications: notice.qualifications, change_summary: notice.changeSummary ?? null, source_hash: sourceHash, updated_at: now };
   });
   const savedRows: Record<string, any>[] = [];
-  for (const part of chunk(rows, 50)) {
+  // Keep payloads small: a 72-hour service window can contain thousands of
+  // rows and Supabase's edge proxy may return 520 for a large upsert body.
+  for (const part of chunk(rows, 10)) {
     if (!part.length) continue;
     const { data } = await retryQuery(() => admin.from("notices").upsert(part, { onConflict: "bid_number,bid_order" }).select("id,bid_number,bid_order"));
     savedRows.push(...(data ?? []));
@@ -36,7 +38,7 @@ export async function runCollectionPass() {
   if (savedRows.length !== rows.length) throw new Error("나라장터 공고 일괄 저장 결과가 일부 누락되었습니다.");
   const idByKey = new Map(savedRows.map((row) => [`${row.bid_number}-${row.bid_order}`, String(row.id)]));
   const versions = validNotices.map((notice) => ({ notice_id: idByKey.get(`${notice.bidNumber}-${notice.order}`), source_hash: JSON.stringify([notice.title, notice.closesAt, notice.status, notice.description]), source_payload: notice }));
-  for (const part of chunk(versions.filter((row) => row.notice_id), 25)) { await retryQuery(() => admin.from("notice_versions").upsert(part, { onConflict: "notice_id,source_hash" }).select()); }
+  for (const part of chunk(versions.filter((row) => row.notice_id), 10)) { await retryQuery(() => admin.from("notice_versions").upsert(part, { onConflict: "notice_id,source_hash" }).select()); }
   // Do not overwrite an already processed attachment with the source's initial
   // `대기` status on every overlapping 72-hour collection run.
   const attachments = validNotices.flatMap((notice) => notice.attachments.map((attachment) => ({ notice_id: idByKey.get(`${notice.bidNumber}-${notice.order}`), source_url: attachment.sourceUrl ?? `unavailable:${attachment.id}`, name: attachment.name, kind: attachment.kind }))).filter((row) => row.notice_id);
