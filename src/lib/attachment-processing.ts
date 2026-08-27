@@ -12,9 +12,9 @@ async function extractLegacyHwp(attachment: Attachment): Promise<Attachment> {
   const base = process.env.HWP_EXTRACTOR_URL ?? (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}/api/hwp-extract` : "");
   const secret = process.env.CRON_SECRET;
   if (!base || !secret) return { ...attachment, status: "보류", failureReason: "구형 HWP 추출기 설정이 없어 분석에서 제외했습니다." };
-  // Vercel's proxy can consume Authorization while routing an internal request.
-  // A purpose-specific header keeps this private extractor authenticated end-to-end.
-  const response = await fetch(base, { method: "POST", headers: { "content-type": "application/json", "x-bidfit-internal-secret": secret }, body: JSON.stringify({ sourceUrl: attachment.sourceUrl }), signal: AbortSignal.timeout(60_000) });
+  // Vercel's proxy can consume custom authentication headers while routing a
+  // Python function. The value stays inside this server-to-server JSON body.
+  const response = await fetch(base, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ sourceUrl: attachment.sourceUrl, internalSecret: secret }), signal: AbortSignal.timeout(60_000) });
   if (!response.ok) return { ...attachment, status: "추출 실패", failureReason: `구형 HWP 텍스트 추출 HTTP ${response.status}` };
   const result = await response.json() as { text?: string; pages?: number; error?: string };
   if (!result.text?.trim()) return { ...attachment, status: "부분 분석", pages: result.pages, failureReason: result.error ?? "구형 HWP에서 텍스트를 추출하지 못했습니다." };

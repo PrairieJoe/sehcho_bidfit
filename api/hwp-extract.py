@@ -42,10 +42,12 @@ class handler(BaseHTTPRequestHandler):
         self.send_response(status); self.send_header("content-type", "application/json; charset=utf-8"); self.send_header("content-length", str(len(encoded))); self.end_headers(); self.wfile.write(encoded)
 
     def do_POST(self):
-        if self.headers.get("x-bidfit-internal-secret") != os.environ.get("CRON_SECRET", ""): return self._json(401, {"error": "unauthorized"})
         try:
             length = int(self.headers.get("content-length", "0"))
             payload = json.loads(self.rfile.read(length))
+            expected = os.environ.get("CRON_SECRET", "")
+            if not expected: return self._json(503, {"error": "extractor secret is unavailable"})
+            if str(payload.get("internalSecret", "")) != expected: return self._json(401, {"error": "unauthorized"})
             url = str(payload.get("sourceUrl", ""))
             if not url.startswith("https://"): return self._json(400, {"error": "invalid source URL"})
             with urllib.request.urlopen(url, timeout=30) as response:
