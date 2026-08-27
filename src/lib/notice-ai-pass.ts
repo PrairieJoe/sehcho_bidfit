@@ -24,11 +24,12 @@ export async function enqueueNoticeAiWhenReady(noticeId: string, delaySeconds = 
   // An attachment may retain its terminal status after its text was deleted
   // following a completed analysis. Never enqueue an AI job for that stale
   // state: it would only produce "추출 텍스트가 없습니다" on every run.
-  if (!textRows.length || rows.some((item: Row) => item.status === "대기" || item.status === "처리 중")) {
-    if (!textRows.length) {
-      await admin.from("notice_ai_jobs").update({ status: "실패", failure_reason: "첨부문서 텍스트가 없어 Gemini 분석을 건너뛰었습니다.", updated_at: new Date().toISOString() }).eq("notice_id", noticeId).in("status", ["대기", "실패"]);
+  const allAttachmentsReady = rows.length > 0 && textRows.length === rows.length;
+  if (!allAttachmentsReady || rows.some((item: Row) => item.status === "대기" || item.status === "처리 중")) {
+    if (!allAttachmentsReady) {
+      await admin.from("notice_ai_jobs").update({ status: "실패", failure_reason: "모든 첨부문서의 텍스트 추출이 끝나지 않아 Gemini 분석을 건너뛰었습니다.", updated_at: new Date().toISOString() }).eq("notice_id", noticeId).in("status", ["대기", "실패"]);
     }
-    return { queued: false, reason: textRows.length ? "첨부문서 처리가 아직 끝나지 않았습니다." : "첨부문서 텍스트가 없습니다." };
+    return { queued: false, reason: allAttachmentsReady ? "첨부문서 처리가 아직 끝나지 않았습니다." : "모든 첨부문서의 텍스트 추출이 완료되지 않았습니다." };
   }
   const analyzerVersion = `gemini:${process.env.GEMINI_MODEL ?? "gemini-3.5-flash-lite"}`;
   const inputHash = createHash("sha256").update(`${analyzerVersion}|${rows.map((item: Row) => `${item.id}:${item.sha256 ?? ""}:${String((Array.isArray(item.attachment_texts) ? item.attachment_texts[0] : item.attachment_texts)?.extracted_text ?? "").length}`).sort().join("|")}`, "utf8").digest("hex");
@@ -73,6 +74,9 @@ export async function processNoticeAiJob(aiJobId: string) {
     const { data: row, error: noticeError } = await admin.from("notices").select("*, attachments(*, attachment_texts(extracted_text))").eq("id", job.notice_id).single();
     if (noticeError) throw noticeError;
     const notice = noticeOf(row);
+    if (!notice.attachments.length || !notice.attachments.every((item) => item.status === "분석 완료" && item.extractedText?.trim())) {
+      throw new Error("모든 첨부문서 분석 완료 전에는 Gemini 점수를 생성하지 않습니다.");
+    }
     const { data: topics, error: topicError } = await admin.from("topics").select("*").limit(10);
     if (topicError) throw topicError;
     for (const topicRow of topics ?? []) {
