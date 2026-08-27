@@ -37,9 +37,9 @@ export async function enqueueReadyNoticeAiJobs() {
   if (error) throw error;
   const noticeIds = [...new Set((data ?? []).map((row: Row) => String(row.notice_id)))];
   let aiQueued = 0;
-  // The free Gemini tier is rate-limited. Space notice-level calls seven seconds
-  // apart so a recovery run does not burst dozens of requests at once.
-  for (const noticeId of noticeIds) if ((await enqueueNoticeAiWhenReady(noticeId, aiQueued * 7)).queued) aiQueued += 1;
+  // Keep a small rolling concurrency window for the free Gemini tier. A linear
+  // delay per notice made the tail of a recovery run take tens of minutes.
+  for (const noticeId of noticeIds) if ((await enqueueNoticeAiWhenReady(noticeId, Math.floor(aiQueued / 4) * 7)).queued) aiQueued += 1;
   return { aiQueued };
 }
 
