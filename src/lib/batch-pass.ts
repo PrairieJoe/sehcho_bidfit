@@ -22,7 +22,7 @@ export async function runDailyBatch() {
   try {
     await ensureDefaultTopic();
     const collection = await runCollectionPass();
-    await admin.from("batch_runs").update({ status: "분석 중", discovered: collection.discovered, changed: collection.changed, api_calls: 4 }).eq("id", started.id);
+    await admin.from("batch_runs").update({ status: "분석 중", discovered: collection.discovered, changed: collection.changed, api_calls: 1 }).eq("id", started.id);
     const queue = await enqueuePendingAttachmentJobs(40);
     const inlineProcessed = await processPendingAttachmentJobsInline(16);
     const aiQueue = await enqueueReadyNoticeAiJobs();
@@ -30,7 +30,7 @@ export async function runDailyBatch() {
     const result = { ...collection, ...queue, ...aiQueue, inlineProcessed, inlineAiProcessed, analyzed: inlineAiProcessed };
     const { error: finishError } = await admin.from("batch_runs").update({
       status: queue.attachmentQueued || aiQueue.aiQueued ? "분석 중" : "완료", completed_at: queue.attachmentQueued || aiQueue.aiQueued ? null : new Date().toISOString(), discovered: result.discovered,
-      changed: result.changed, analyzed: result.analyzed, api_calls: 4,
+      changed: result.changed, analyzed: result.analyzed, api_calls: 1,
       error_summary: queue.attachmentQueued || aiQueue.aiQueued ? `첨부문서 ${queue.attachmentQueued}건, 공고 AI 분석 ${aiQueue.aiQueued}건을 대기열에 등록했습니다.` : null,
     }).eq("id", started.id);
     if (finishError) throw finishError;
@@ -54,7 +54,7 @@ export async function runGithubActionsBatch() {
   try {
     await ensureDefaultTopic();
     const collection = await runCollectionPass();
-    await admin.from("batch_runs").update({ status: "분석 중", discovered: collection.discovered, changed: collection.changed, api_calls: 4 }).eq("id", started.id);
+    await admin.from("batch_runs").update({ status: "분석 중", discovered: collection.discovered, changed: collection.changed, api_calls: 1 }).eq("id", started.id);
     let attachmentProcessed = 0;
     let aiProcessed = 0;
     for (let cycle = 0; cycle < 120; cycle += 1) {
@@ -75,7 +75,7 @@ export async function runGithubActionsBatch() {
     const { count: remainingAttachments } = await admin.from("processing_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]);
     const { count: remainingAi } = await admin.from("notice_ai_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]);
     const complete = (remainingAttachments ?? 0) === 0 && (remainingAi ?? 0) === 0;
-    await admin.from("batch_runs").update({ status: complete ? "완료" : "부분 완료", completed_at: new Date().toISOString(), discovered: collection.discovered, changed: collection.changed, analyzed: analyzed ?? 0, api_calls: 4, error_summary: complete ? null : `작업 시간 제한으로 첨부 ${remainingAttachments ?? 0}건·AI ${remainingAi ?? 0}건이 다음 실행으로 이월되었습니다.` }).eq("id", started.id);
+    await admin.from("batch_runs").update({ status: complete ? "완료" : "부분 완료", completed_at: new Date().toISOString(), discovered: collection.discovered, changed: collection.changed, analyzed: analyzed ?? 0, api_calls: 1, error_summary: complete ? null : `작업 시간 제한으로 첨부 ${remainingAttachments ?? 0}건·AI ${remainingAi ?? 0}건이 다음 실행으로 이월되었습니다.` }).eq("id", started.id);
     return { ...collection, attachmentProcessed, aiProcessed, analyzed: analyzed ?? 0, complete };
   } catch (error) {
     await admin.from("batch_runs").update({ status: "부분 완료", completed_at: new Date().toISOString(), error_summary: error instanceof Error ? error.message : "작업자 실행 실패" }).eq("id", started.id);

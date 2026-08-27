@@ -2,10 +2,10 @@ import type { Attachment, BidNotice, BidSource, BusinessType, NoticeStatus } fro
 import { runtimeEnv } from "@/lib/runtime-env";
 
 const BASE_URL = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService";
-const LIST_ENDPOINTS: Array<[BusinessType, string]> = [["용역", "getBidPblancListInfoServc"], ["물품", "getBidPblancListInfoThng"], ["공사", "getBidPblancListInfoCnstwk"], ["외자", "getBidPblancListInfoFrgcpt"]];
-// Keep one invocation comfortably inside the Vercel Hobby function budget.
-// The next daily run continues with the overlapping time window.
-const MAX_PAGES_PER_TYPE = 1;
+// BidFit's product scope is service procurements only. Do not mix goods,
+// construction, or foreign-purchase notices into the user's result set.
+const LIST_ENDPOINTS: Array<[BusinessType, string]> = [["용역", "getBidPblancListInfoServc"]];
+const PAGE_SIZE = 100;
 
 function value(item: Record<string, unknown>, ...keys: string[]) {
   for (const key of keys) { const found = item[key]; if (found !== undefined && found !== null && String(found).trim()) return String(found).trim(); }
@@ -53,12 +53,11 @@ export class NarajangteoBidSource implements BidSource {
     const serviceKey = this.configuredKey?.trim().replace(/%([0-9A-Fa-f]{2})/g, (match) => String.fromCharCode(parseInt(match.slice(1), 16)));
     if (!serviceKey) throw new Error("NARAJANGTEO_SERVICE_KEY가 설정되지 않았습니다.");
     const notices: BidNotice[] = [];
-    // Query the four catalogues concurrently. A single slow catalogue must not
-    // hold the whole daily run indefinitely.
+    // Query the service catalogue and walk every page in the 72-hour window.
     await Promise.all(LIST_ENDPOINTS.map(async ([businessType, endpoint]) => {
-      for (let pageNo = 1; pageNo <= MAX_PAGES_PER_TYPE; pageNo += 1) {
+      for (let pageNo = 1; ; pageNo += 1) {
       const url = new URL(`${BASE_URL}/${endpoint}`);
-      [["serviceKey", serviceKey], ["type", "json"], ["numOfRows", "20"], ["pageNo", String(pageNo)], ["inqryDiv", "1"], ["inqryBgnDt", requestDate(windowStart)], ["inqryEndDt", requestDate(windowEnd)]].forEach(([key, entry]) => url.searchParams.set(key, entry));
+      [["serviceKey", serviceKey], ["type", "json"], ["numOfRows", String(PAGE_SIZE)], ["pageNo", String(pageNo)], ["inqryDiv", "1"], ["inqryBgnDt", requestDate(windowStart)], ["inqryEndDt", requestDate(windowEnd)]].forEach(([key, entry]) => url.searchParams.set(key, entry));
       const response = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(20_000) });
       if (!response.ok) throw new Error(`나라장터 ${businessType} 목록 조회 실패 (${response.status})`);
       const payload = await response.json() as { response?: { header?: { resultCode?: string | number; resultMsg?: string }; body?: { items?: { item?: Record<string, unknown> | Record<string, unknown>[] } | Record<string, unknown>[]; totalCount?: number } } };
@@ -72,7 +71,8 @@ export class NarajangteoBidSource implements BidSource {
       const attachmentFieldCount = items.filter((entry) => attachmentsOf(entry, `${value(entry, "bidNtceNo", "bidNtceNoInfo")}-${value(entry, "bidNtceOrd", "bidNtceOrdNo") || "000"}`).length > 0).length;
       console.log(`[Nara] ${businessType} 목록 ${items.length}건 중 첨부 필드 확인 ${attachmentFieldCount}건`);
       notices.push(...items.map((entry) => normalizeItem(entry, businessType)).filter((entry): entry is BidNotice => Boolean(entry)));
-      if (items.length < 20 || pageNo * 20 >= Number(payload.response?.body?.totalCount ?? 0)) break;
+      const totalCount = Number(payload.response?.body?.totalCount ?? 0);
+      if (items.length < PAGE_SIZE || pageNo * PAGE_SIZE >= totalCount) break;
       }
     }));
     // Keep every unique notice returned by the four business-type queries.

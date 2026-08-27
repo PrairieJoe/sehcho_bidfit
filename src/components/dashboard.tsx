@@ -103,7 +103,7 @@ function Overview({ notices, eligible, topic, onOpen, onShowAll, isAdmin, latest
             ? `오늘 ${time(latestRun.completedAt ?? latestRun.startedAt)} ${latestRun.discovered}건을 수집했습니다. 첨부문서 분석 결과가 아직 없어 점수를 표시하지 않습니다.`
             : "오늘 나라장터에서 새로 확인할 공고가 없었습니다.";
   return <div className="page-content">
-    <section className="title-row"><div><p className="eyebrow">매일 08:00~09:00 KST 정기 업데이트</p><h1>오늘의 입찰 기회</h1><p className="lede"><strong>{topic.name}</strong>와 관련된 공고만 분석 완료 후 보여드립니다.</p></div></section>
+    <section className="title-row"><div><p className="eyebrow">매일 08:00~09:00 KST 정기 업데이트</p><h1>오늘의 입찰 기회</h1><p className="lede">최근 72시간의 용역 공고를 분석하고, <strong>{topic.name}</strong>와 가까운 공고를 우선 추천합니다.</p></div></section>
     <section className={`batch-status ${isRunning ? "running" : isPartial ? "failed" : "complete"}`}><div><strong>{isRunning ? "오늘의 분석 진행 중" : isPartial ? "오늘의 업데이트 확인 필요" : "오늘의 분석 결과"}</strong><p>{statusText}</p></div><span>{latestRun?.status ?? "대기"}</span></section>
     <section className="metric-grid">
       <Metric icon={<FileText />} value={analyzed} label="분석 완료 공고" note="첨부문서 근거 확보 후 표시" />
