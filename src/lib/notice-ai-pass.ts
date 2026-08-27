@@ -19,12 +19,14 @@ export async function enqueueNoticeAiWhenReady(noticeId: string, delaySeconds = 
   const { data: attachments, error } = await admin.from("attachments").select("id,status,sha256,attachment_texts(extracted_text)").eq("notice_id", noticeId);
   if (error) throw error;
   const rows = attachments ?? [];
+  const { data: noticeMeta, error: noticeMetaError } = await admin.from("notices").select("title,description").eq("id", noticeId).maybeSingle();
+  if (noticeMetaError) throw noticeMetaError;
   const completedRows = rows.filter((item: Row) => item.status === "분석 완료");
   const textRows = completedRows.filter((item: Row) => String((Array.isArray(item.attachment_texts) ? item.attachment_texts[0] : item.attachment_texts)?.extracted_text ?? "").trim());
   // An attachment may retain its terminal status after its text was deleted
   // following a completed analysis. Never enqueue an AI job for that stale
   // state: it would only produce "추출 텍스트가 없습니다" on every run.
-  const allAttachmentsReady = rows.length > 0 && textRows.length === rows.length;
+  const allAttachmentsReady = rows.length === 0 || textRows.length === rows.length;
   if (!allAttachmentsReady || rows.some((item: Row) => item.status === "대기" || item.status === "처리 중")) {
     if (!allAttachmentsReady) {
       await admin.from("notice_ai_jobs").update({ status: "실패", failure_reason: "모든 첨부문서의 텍스트 추출이 끝나지 않아 Gemini 분석을 건너뛰었습니다.", updated_at: new Date().toISOString() }).eq("notice_id", noticeId).in("status", ["대기", "실패"]);
@@ -32,7 +34,7 @@ export async function enqueueNoticeAiWhenReady(noticeId: string, delaySeconds = 
     return { queued: false, reason: allAttachmentsReady ? "첨부문서 처리가 아직 끝나지 않았습니다." : "모든 첨부문서의 텍스트 추출이 완료되지 않았습니다." };
   }
   const analyzerVersion = `gemini:${process.env.GEMINI_MODEL ?? "gemini-3.5-flash-lite"}`;
-  const inputHash = createHash("sha256").update(`${analyzerVersion}|${rows.map((item: Row) => `${item.id}:${item.sha256 ?? ""}:${String((Array.isArray(item.attachment_texts) ? item.attachment_texts[0] : item.attachment_texts)?.extracted_text ?? "").length}`).sort().join("|")}`, "utf8").digest("hex");
+  const inputHash = createHash("sha256").update(`${analyzerVersion}|${String(noticeMeta?.title ?? "")}|${String(noticeMeta?.description ?? "")}|${rows.map((item: Row) => `${item.id}:${item.sha256 ?? ""}:${String((Array.isArray(item.attachment_texts) ? item.attachment_texts[0] : item.attachment_texts)?.extracted_text ?? "").length}`).sort().join("|")}`, "utf8").digest("hex");
   const { data: inserted, error: jobError } = await admin.from("notice_ai_jobs").upsert({ notice_id: noticeId, input_hash: inputHash, status: "대기" }, { onConflict: "notice_id,input_hash", ignoreDuplicates: true }).select("id,status").maybeSingle();
   if (jobError) throw jobError;
   const job = inserted ?? (await admin.from("notice_ai_jobs").select("id,status").eq("notice_id", noticeId).eq("input_hash", inputHash).maybeSingle()).data;
@@ -74,7 +76,7 @@ export async function processNoticeAiJob(aiJobId: string) {
     const { data: row, error: noticeError } = await admin.from("notices").select("*, attachments(*, attachment_texts(extracted_text))").eq("id", job.notice_id).single();
     if (noticeError) throw noticeError;
     const notice = noticeOf(row);
-    if (!notice.attachments.length || !notice.attachments.every((item) => item.status === "분석 완료" && item.extractedText?.trim())) {
+    if (notice.attachments.length && !notice.attachments.every((item) => item.status === "분석 완료" && item.extractedText?.trim())) {
       throw new Error("모든 첨부문서 분석 완료 전에는 Gemini 점수를 생성하지 않습니다.");
     }
     const { data: topics, error: topicError } = await admin.from("topics").select("*").limit(10);
