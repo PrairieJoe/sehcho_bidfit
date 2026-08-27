@@ -23,7 +23,7 @@ export async function runDailyBatch() {
     await ensureDefaultTopic();
     const collection = await runCollectionPass();
     await admin.from("batch_runs").update({ status: "분석 중", discovered: collection.discovered, changed: collection.changed, api_calls: 4 }).eq("id", started.id);
-    const queue = await enqueuePendingAttachmentJobs(200);
+    const queue = await enqueuePendingAttachmentJobs(40);
     const inlineProcessed = await processPendingAttachmentJobsInline(16);
     const aiQueue = await enqueueReadyNoticeAiJobs();
     const inlineAiProcessed = await processPendingNoticeAiJobsInline(8);
