@@ -11,4 +11,4 @@ const queueHandler = handleCallback<AttachmentQueueMessage>(async (message) => {
 
 // Export the callback directly so Vercel Queue can discover and invoke this
 // consumer route. A wrapper POST function is not registered as a queue trigger.
-export const POST = queueHandler;
+export const POST = queueHandler as unknown as (request: Request) => Promise<Response>;

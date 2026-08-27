@@ -7,4 +7,4 @@ const queueHandler = handleCallback<NoticeAiQueueMessage>(async (message) => {
   await processNoticeAiJob(message.aiJobId);
 }, { visibilityTimeoutSeconds: 120, retry: (_error, metadata) => metadata.deliveryCount >= 3 ? { acknowledge: true } : { afterSeconds: 60 } });
 
-export const POST = queueHandler;
+export const POST = queueHandler as unknown as (request: Request) => Promise<Response>;
