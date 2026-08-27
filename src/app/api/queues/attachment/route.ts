@@ -9,8 +9,6 @@ const queueHandler = handleCallback<AttachmentQueueMessage>(async (message) => {
   await processQueuedAttachmentJob(message.jobId);
 }, { visibilityTimeoutSeconds: 300 });
 
-// Keep the App Router's public handler signature while Queue handles the
-// callback envelope and acknowledgement protocol internally.
-export async function POST(request: Request) {
-  return queueHandler(request);
-}
+// Export the callback directly so Vercel Queue can discover and invoke this
+// consumer route. A wrapper POST function is not registered as a queue trigger.
+export const POST = queueHandler;
