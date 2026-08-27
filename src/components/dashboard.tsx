@@ -87,9 +87,13 @@ function NavItem({ active, icon, label, badge, onClick }: { active: boolean; ico
 
 function Overview({ notices, eligible, topic, onOpen, onShowAll, isAdmin, latestRun, previousRun }: { notices: BidNotice[]; eligible: BidNotice[]; topic: Topic; onOpen: (notice: BidNotice) => void; onShowAll: () => void; isAdmin: boolean; latestRun?: BatchRun; previousRun?: BatchRun }) {
   const isRunning = latestRun?.status === "실행 중" || latestRun?.status === "분석 중";
-  const previousCompleted = isRunning ? previousRun : latestRun;
+  // `notices` is already the atomically published snapshot from the server.
+  // During a running or partial batch, the latest run's counters describe
+  // unfinished work, so never use them to overwrite the visible snapshot.
+  const previousCompleted = latestRun?.status === "완료" ? latestRun : previousRun;
+  const hasPublishedResult = Boolean(previousCompleted);
   const high = notices.filter((item) => (item.analysis?.score ?? 0) >= 85).length;
-  const analyzed = isRunning ? notices.filter((item) => item.analysis).length : (latestRun?.analyzed ?? notices.filter((item) => item.analysis).length);
+  const analyzed = hasPublishedResult ? notices.length : "-";
   const changed = notices.filter((item) => item.status === "정정" || item.status === "재공고").length;
   const isPartial = latestRun?.status === "부분 완료";
   const statusText = !latestRun
@@ -107,8 +111,8 @@ function Overview({ notices, eligible, topic, onOpen, onShowAll, isAdmin, latest
     <section className="title-row"><div><p className="eyebrow">매일 08:00~09:00 KST 정기 업데이트</p><h1>오늘의 입찰 기회</h1><p className="lede">최근 72시간의 용역 공고를 분석하고, <strong>{topic.name}</strong>와 가까운 공고를 우선 추천합니다.</p></div></section>
     <section className={`batch-status ${isRunning ? "running" : isPartial ? "failed" : "complete"}`}><div><strong>{isRunning ? "오늘의 분석 진행 중" : isPartial ? "오늘의 업데이트 확인 필요" : "오늘의 분석 결과"}</strong><p>{statusText}</p></div><span>{latestRun?.status ?? "대기"}</span></section>
     <section className="metric-grid">
-      <Metric icon={<FileText />} value={isRunning && !previousCompleted ? "-" : analyzed} label="분석 완료 공고" note="첨부문서 근거 확보 후 표시" />
-      <Metric icon={<Clock3 />} value={isRunning ? (previousCompleted?.discovered ?? "-") : (latestRun?.discovered ?? "-")} label={isRunning ? "이전 업데이트 수집" : "이번 업데이트 수집"} note={isRunning ? "오늘 분석 완료 전까지 표시" : "최근 72시간 중첩 조회"} tone="orange" />
+      <Metric icon={<FileText />} value={analyzed} label="분석 완료 공고" note="첨부문서 근거 확보 후 표시" />
+      <Metric icon={<Clock3 />} value={latestRun?.status === "완료" ? latestRun.discovered : (previousCompleted?.discovered ?? "-")} label={latestRun?.status === "완료" ? "이번 업데이트 수집" : "이전 업데이트 수집"} note={latestRun?.status === "완료" ? "최근 72시간 중첩 조회" : "새 결과 준비 전까지 표시"} tone="orange" />
       <Metric icon={<Sparkles />} value={eligible.length} label={`${topic.threshold}점 이상 추천`} note={`관심 주제: ${topic.name}`} tone="blue" />
       <Metric icon={<Clock3 />} value={high} label="우선 검토 공고" note="85점 이상 · 매우 높음" tone="green" />
       <Metric icon={<CircleAlert />} value={changed} label="정정·재공고" note="변경 내용을 확인하세요" tone="orange" />
