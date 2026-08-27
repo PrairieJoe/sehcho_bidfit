@@ -42,8 +42,8 @@ async function snapshotWindow(admin: ReturnType<typeof createSupabaseAdminClient
   // A failed/partial run has already updated notice rows, so using the latest
   // completed timestamp alone would expose that incomplete snapshot. Keep the
   // data strictly before the first incomplete run after the last completion.
-  if (incomplete?.started_at && (!completed?.started_at || String(incomplete.started_at) > String(completed.started_at))) return { before: String(incomplete.started_at), hasCompleted: Boolean(completed?.started_at) };
-  return completed?.started_at ? { hasCompleted: true } : { hasCompleted: false };
+  if (incomplete?.started_at && (!completed?.started_at || String(incomplete.started_at) > String(completed.started_at))) return { after: completed?.started_at ? String(completed.started_at) : undefined, before: String(incomplete.started_at), hasCompleted: Boolean(completed?.started_at) };
+  return completed?.started_at ? { after: String(completed.started_at), hasCompleted: true } : { hasCompleted: false };
 }
 
 export class PublicRepository {
@@ -61,7 +61,7 @@ export class PublicRepository {
       // A collection pass updates notice.updated_at before analysis finishes.
       // Therefore the public snapshot boundary must be applied to the score,
       // not to the notice row, otherwise a failed run erases the prior result.
-      const scores = (row.topic_scores as Row[] | undefined)?.filter((score) => score.topic_id === topic.id && typeof (score.analysis as Row | undefined)?.aiModel === "string" && (!window.before || String(score.updated_at ?? "") < window.before));
+      const scores = (row.topic_scores as Row[] | undefined)?.filter((score) => score.topic_id === topic.id && typeof (score.analysis as Row | undefined)?.aiModel === "string" && (!window.after || String(score.updated_at ?? "") >= window.after) && (!window.before || String(score.updated_at ?? "") < window.before));
       return noticeOf({ ...row, topic_scores: scores }, undefined, Boolean(window.before && window.hasCompleted));
     }).filter((notice) => window.hasCompleted && notice.analysis);
   }
