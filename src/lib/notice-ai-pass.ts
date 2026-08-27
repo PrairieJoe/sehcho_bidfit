@@ -33,13 +33,20 @@ export async function enqueueNoticeAiWhenReady(noticeId: string, delaySeconds = 
 /** Enqueues old, already-extracted notices after an AI key or model is newly configured. */
 export async function enqueueReadyNoticeAiJobs() {
   const admin = createSupabaseAdminClient();
-  const { data, error } = await admin.from("attachments").select("notice_id").eq("status", "분석 완료").limit(500);
+  // Publish a bounded slice per daily run. Queue retention keeps the rest for
+  // the next run; scanning and sending hundreds of messages serially can make
+  // the Vercel coordinator hit its execution limit.
+  const { data, error } = await admin.from("attachments").select("notice_id").eq("status", "분석 완료").limit(32);
   if (error) throw error;
   const noticeIds = [...new Set((data ?? []).map((row: Row) => String(row.notice_id)))];
   let aiQueued = 0;
   // Keep a small rolling concurrency window for the free Gemini tier. A linear
   // delay per notice made the tail of a recovery run take tens of minutes.
-  for (const noticeId of noticeIds) if ((await enqueueNoticeAiWhenReady(noticeId, Math.floor(aiQueued / 4) * 7)).queued) aiQueued += 1;
+  for (let index = 0; index < noticeIds.length; index += 8) {
+    const group = noticeIds.slice(index, index + 8);
+    const results = await Promise.all(group.map((noticeId) => enqueueNoticeAiWhenReady(noticeId).catch(() => ({ queued: false }))));
+    aiQueued += results.filter((result) => result.queued).length;
+  }
   return { aiQueued };
 }
 
