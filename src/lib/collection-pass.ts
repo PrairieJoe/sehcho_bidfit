@@ -5,7 +5,10 @@ const chunk = <T,>(items: T[], size: number) => Array.from({ length: Math.ceil(i
 
 export async function runCollectionPass() {
   const notices = await getBidSource().listNotices(new Date(Date.now() - 72 * 3_600_000), new Date());
-  const validNotices = notices.filter((notice) => Boolean(notice.closesAt));
+  // A missing/invalid deadline is a data-quality issue, not a reason to drop
+  // the notice. Keep the notice in the daily snapshot so the user can see it
+  // and the detail page can show “확인 필요” instead of silently losing it.
+  const validNotices = notices;
   const admin = createSupabaseAdminClient();
   const now = new Date().toISOString();
   const rows = validNotices.map((notice) => {
@@ -25,7 +28,7 @@ export async function runCollectionPass() {
   for (const part of chunk(versions.filter((row) => row.notice_id), 50)) { const { error } = await admin.from("notice_versions").upsert(part, { onConflict: "notice_id,source_hash" }); if (error) throw error; }
   // Do not overwrite an already processed attachment with the source's initial
   // `대기` status on every overlapping 72-hour collection run.
-  const attachments = validNotices.flatMap((notice) => notice.attachments.slice(0, 3).map((attachment) => ({ notice_id: idByKey.get(`${notice.bidNumber}-${notice.order}`), source_url: attachment.sourceUrl ?? `unavailable:${attachment.id}`, name: attachment.name, kind: attachment.kind }))).filter((row) => row.notice_id);
+  const attachments = validNotices.flatMap((notice) => notice.attachments.map((attachment) => ({ notice_id: idByKey.get(`${notice.bidNumber}-${notice.order}`), source_url: attachment.sourceUrl ?? `unavailable:${attachment.id}`, name: attachment.name, kind: attachment.kind }))).filter((row) => row.notice_id);
   const savedAttachments: Record<string, any>[] = [];
   for (const part of chunk(attachments, 50)) { if (!part.length) continue; const { data, error } = await admin.from("attachments").upsert(part, { onConflict: "notice_id,source_url" }).select("id"); if (error) throw error; savedAttachments.push(...(data ?? [])); }
   // Existing completed jobs must not be reset to "대기" every day. New and stale

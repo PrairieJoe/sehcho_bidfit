@@ -30,12 +30,25 @@ function statusOf(item: Record<string, unknown>, closesAt: string): NoticeStatus
 }
 function attachmentsOf(item: Record<string, unknown>, key: string): Attachment[] {
   const attachments: Attachment[] = [];
+  const seen = new Set<string>();
+  const add = (name: string, sourceUrl: string, fallback: string) => {
+    const url = sourceUrl.trim();
+    const fileName = name.trim() || fallback;
+    if (!url && !name.trim()) return;
+    const dedupe = url || `${fileName}-${attachments.length}`;
+    if (seen.has(dedupe)) return;
+    seen.add(dedupe);
+    attachments.push({ id: `${key}-file-${attachments.length + 1}`, name: fileName, kind: (fileName || url).split("?")[0].split(".").pop()?.toUpperCase() || "FILE", status: "대기", sourceUrl: url });
+  };
   for (let index = 1; index <= 10; index += 1) {
     const name = value(item, `ntceSpecFileNm${index}`, `bidNtceSpecFileNm${index}`, `fileNm${index}`);
     const sourceUrl = value(item, `ntceSpecDocUrl${index}`, `bidNtceSpecDocUrl${index}`, `fileUrl${index}`);
-    if (!name && !sourceUrl) continue;
-    attachments.push({ id: `${key}-file-${index}`, name: name || `첨부파일 ${index}`, kind: (name || sourceUrl).split("?")[0].split(".").pop()?.toUpperCase() || "FILE", status: "대기", sourceUrl });
+    add(name, sourceUrl, `첨부파일 ${index}`);
   }
+  // The standard notice document and supplementary documents are also valid
+  // attachments, but are not always duplicated in ntceSpecFileNm* fields.
+  add(value(item, "stdNtceDocNm", "stdNtceFileNm"), value(item, "stdNtceDocUrl"), "표준 공고문서");
+  for (let index = 1; index <= 5; index += 1) add(value(item, `sptDscrptFileNm${index}`), value(item, `sptDscrptDocUrl${index}`), `보충설명문서 ${index}`);
   return attachments;
 }
 function normalizeItem(item: Record<string, unknown>, businessType: BusinessType): BidNotice | null {

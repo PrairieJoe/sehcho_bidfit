@@ -57,7 +57,7 @@ export async function runGithubActionsBatch() {
     await admin.from("batch_runs").update({ status: "분석 중", discovered: collection.discovered, changed: collection.changed, api_calls: 1 }).eq("id", started.id);
     let attachmentProcessed = 0;
     let aiProcessed = 0;
-    for (let cycle = 0; cycle < 120; cycle += 1) {
+    for (let cycle = 0; cycle < 1_000; cycle += 1) {
       console.log(`[Batch] cycle=${cycle + 1} attachmentProcessed=${attachmentProcessed} aiProcessed=${aiProcessed}`);
       attachmentProcessed += await processPendingAttachmentJobsInline(40, false);
       await enqueueReadyNoticeAiJobs({ publish: false });

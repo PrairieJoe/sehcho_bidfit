@@ -90,7 +90,10 @@ export async function processQueuedAttachmentJob(jobId: string, options: { publi
     status: String(attachment.status) as Attachment["status"], sourceUrl: String(attachment.source_url ?? ""),
   });
   await admin.from("attachments").update({ status: processed.status, storage_path: null, pages: processed.pages ?? null, sha256: processed.extractedText ? createHash("sha256").update(processed.extractedText, "utf8").digest("hex") : null, failure_reason: processed.failureReason ?? null, updated_at: new Date().toISOString() }).eq("id", attachment.id);
-  if (processed.extractedText) await admin.from("attachment_texts").upsert({ attachment_id: attachment.id, extracted_text: processed.extractedText, page_map: [], extractor_version: "temporary-text-v1" });
+  if (processed.extractedText) {
+    const { error: textError } = await admin.from("attachment_texts").upsert({ attachment_id: attachment.id, extracted_text: processed.extractedText, page_map: [], extractor_version: "temporary-text-v1" });
+    if (textError) throw textError;
+  }
   const terminal = processed.status === "분석 완료" || processed.status === "부분 분석" || processed.status === "보류";
   await admin.from("processing_jobs").update({ status: terminal ? "완료" : "실패", failure_reason: processed.failureReason ?? null, updated_at: new Date().toISOString() }).eq("id", jobId);
   const ai = await enqueueNoticeAiWhenReady(String(attachment.notice_id), 0, options.publishAiQueue ?? true);

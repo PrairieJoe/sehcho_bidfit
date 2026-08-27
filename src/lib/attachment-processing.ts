@@ -2,7 +2,6 @@ import JSZip from "jszip";
 import type { Attachment } from "@/lib/types";
 import { extractHwpText } from "@/lib/hwp-text";
 
-export const MAX_ATTACHMENTS_PER_NOTICE = 3;
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 const MAX_EXTRACTED_TEXT_CHARS = 200_000;
 
@@ -11,7 +10,7 @@ function cleanXml(value: string) { return value.replace(/<[^>]+>/g, " ").replace
 
 export async function processAttachment(noticeId: string, attachment: Attachment): Promise<Attachment> {
   const extension = extensionOf(attachment.name || attachment.sourceUrl || "");
-  if (!attachment.sourceUrl) return { ...attachment, status: "보류", failureReason: "나라장터 API가 첨부파일 다운로드 주소를 제공하지 않았습니다." };
+  if (!attachment.sourceUrl || attachment.sourceUrl.startsWith("unavailable:")) return { ...attachment, status: "보류", failureReason: "나라장터 API가 첨부파일 다운로드 주소를 제공하지 않았습니다." };
   if (!['pdf', 'hwpx', 'hwp'].includes(extension)) return { ...attachment, status: "보류", failureReason: "PDF·HWP·HWPX만 현재 처리합니다." };
   try {
     const response = await fetch(attachment.sourceUrl, { cache: "no-store", redirect: "follow", signal: AbortSignal.timeout(5_000) });

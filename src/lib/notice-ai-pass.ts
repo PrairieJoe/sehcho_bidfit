@@ -51,7 +51,7 @@ export async function enqueueReadyNoticeAiJobs(options: { publish?: boolean } = 
   // explicit title/description fallback in analyzeWithGemini. The previous
   // attachment-only scan silently excluded no-attachment notices and made the
   // dashboard report a misleading zero.
-  const { data, error } = await admin.from("notices").select("id,attachments(id,status,attachment_texts(extracted_text))").order("updated_at", { ascending: false }).limit(200);
+  const { data, error } = await admin.from("notices").select("id,attachments(id,status,attachment_texts(extracted_text))").order("updated_at", { ascending: false }).limit(5_000);
   if (error) throw error;
   const noticeIds = (data ?? []).filter((row: Row) => {
     const attachments = Array.isArray(row.attachments) ? row.attachments : [];
@@ -88,7 +88,7 @@ export async function processNoticeAiJob(aiJobId: string) {
     if (topicError) throw topicError;
     for (const topicRow of topics ?? []) {
       const topic = topicOf(topicRow);
-      const analysis = await analyzeWithGemini(notice, topic);
+      const analysis = { ...await analyzeWithGemini(notice, topic), sourceHash: String(row.source_hash ?? "") };
       const { error: scoreError } = await admin.from("topic_scores").upsert({ topic_id: topic.id, notice_id: notice.id, analysis, score: analysis.score, updated_at: new Date().toISOString() }, { onConflict: "topic_id,notice_id" });
       if (scoreError) throw scoreError;
     }
