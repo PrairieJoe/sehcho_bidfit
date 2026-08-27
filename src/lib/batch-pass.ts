@@ -58,6 +58,7 @@ export async function runGithubActionsBatch() {
     let attachmentProcessed = 0;
     let aiProcessed = 0;
     for (let cycle = 0; cycle < 120; cycle += 1) {
+      console.log(`[Batch] cycle=${cycle + 1} attachmentProcessed=${attachmentProcessed} aiProcessed=${aiProcessed}`);
       attachmentProcessed += await processPendingAttachmentJobsInline(40, false);
       await enqueueReadyNoticeAiJobs({ publish: false });
       aiProcessed += await processPendingNoticeAiJobsInline(4);
@@ -65,6 +66,7 @@ export async function runGithubActionsBatch() {
         admin.from("processing_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]),
         admin.from("notice_ai_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]),
       ]);
+      console.log(`[Batch] pending attachments=${pendingAttachments ?? 0} ai=${pendingAi ?? 0}`);
       if ((pendingAttachments ?? 0) === 0 && (pendingAi ?? 0) === 0) break;
       if (attachmentProcessed === 0 && aiProcessed === 0) await new Promise((resolve) => setTimeout(resolve, 2_000));
     }

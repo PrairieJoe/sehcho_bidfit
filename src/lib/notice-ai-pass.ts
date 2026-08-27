@@ -58,6 +58,7 @@ export async function processNoticeAiJob(aiJobId: string) {
   const { data: claimed, error: claimError } = await admin.from("notice_ai_jobs").update({ status: "처리 중", attempts: Number(job.attempts) + 1, updated_at: new Date().toISOString() }).eq("id", aiJobId).in("status", ["대기", "실패"]).select("id").maybeSingle();
   if (claimError) throw claimError;
   if (!claimed) return { skipped: true };
+  console.log(`[Gemini] 시작 job=${aiJobId} notice=${String(job.notice_id)}`);
   try {
     const { data: row, error: noticeError } = await admin.from("notices").select("*, attachments(*, attachment_texts(extracted_text))").eq("id", job.notice_id).single();
     if (noticeError) throw noticeError;
@@ -72,10 +73,13 @@ export async function processNoticeAiJob(aiJobId: string) {
     }
     await admin.from("attachment_texts").delete().in("attachment_id", notice.attachments.map((item) => item.id));
     await admin.from("notice_ai_jobs").update({ status: "완료", completed_at: new Date().toISOString(), failure_reason: null, updated_at: new Date().toISOString() }).eq("id", aiJobId);
+    console.log(`[Gemini] 완료 job=${aiJobId} topics=${(topics ?? []).length}`);
     await finishActiveBatchIfDrained();
     return { skipped: false, analyzed: (topics ?? []).length };
   } catch (cause) {
-    await admin.from("notice_ai_jobs").update({ status: "실패", failure_reason: cause instanceof Error ? cause.message : "AI 분석 실패", updated_at: new Date().toISOString() }).eq("id", aiJobId);
+    const reason = cause instanceof Error ? cause.message : "AI 분석 실패";
+    console.error(`[Gemini] 실패 job=${aiJobId}: ${reason}`);
+    await admin.from("notice_ai_jobs").update({ status: "실패", failure_reason: reason, updated_at: new Date().toISOString() }).eq("id", aiJobId);
     await finishActiveBatchIfDrained();
     throw cause;
   }
@@ -93,6 +97,7 @@ export async function processPendingNoticeAiJobsInline(limit = 32) {
       try { await processNoticeAiJob(String(row.id)); return 1; } catch { return 0; }
     }));
     processed += results.reduce<number>((sum, value) => sum + value, 0);
+    console.log(`[Gemini] 진행 ${Math.min(index + group.length, data?.length ?? 0)}/${data?.length ?? 0}`);
   }
   return processed;
 }
