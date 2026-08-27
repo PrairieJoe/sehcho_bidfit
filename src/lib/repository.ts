@@ -20,10 +20,12 @@ const noticeOf = (row: Row, state?: Row, allowLegacyAnalysis = false): BidNotice
 };
 const runOf = (row: Row): BatchRun => ({ id: String(row.id), startedAt: String(row.started_at), completedAt: row.completed_at ? String(row.completed_at) : undefined, status: String(row.status) as BatchRun["status"], discovered: Number(row.discovered), changed: Number(row.changed), analyzed: Number(row.analyzed), notified: Number(row.notified), apiCalls: Number(row.api_calls), errorSummary: String(row.error_summary ?? "") || undefined });
 async function snapshotWindow(admin: ReturnType<typeof createSupabaseAdminClient>) {
-  const { data: active } = await admin.from("batch_runs").select("started_at").in("status", ["실행 중", "분석 중"]).order("started_at", { ascending: false }).limit(1).maybeSingle();
-  if (active?.started_at) return { before: String(active.started_at) };
-  const { data: completed } = await admin.from("batch_runs").select("started_at").eq("status", "완료").order("started_at", { ascending: false }).limit(1).maybeSingle();
-  return completed?.started_at ? { from: String(completed.started_at) } : {};
+  const { data: latest } = await admin.from("batch_runs").select("started_at,status").order("started_at", { ascending: false }).limit(1).maybeSingle();
+  // A failed/partial run has already updated notice rows, so using the latest
+  // completed timestamp alone would expose that incomplete snapshot. Keep the
+  // data strictly before the failed/running run until a later run is complete.
+  if (latest?.started_at && latest.status !== "완료") return { before: String(latest.started_at) };
+  return latest?.started_at ? { from: String(latest.started_at) } : {};
 }
 
 export class PublicRepository {
