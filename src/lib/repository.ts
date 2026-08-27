@@ -25,14 +25,26 @@ async function snapshotWindow(admin: ReturnType<typeof createSupabaseAdminClient
   // A failed/partial run has already updated notice rows, so using the latest
   // completed timestamp alone would expose that incomplete snapshot. Keep the
   // data strictly before the first incomplete run after the last completion.
-  if (incomplete?.started_at && (!completed?.started_at || String(incomplete.started_at) > String(completed.started_at))) return { before: String(incomplete.started_at) };
-  return completed?.started_at ? { from: String(completed.started_at) } : {};
+  if (incomplete?.started_at && (!completed?.started_at || String(incomplete.started_at) > String(completed.started_at))) return { before: String(incomplete.started_at), hasCompleted: Boolean(completed?.started_at) };
+  return completed?.started_at ? { hasCompleted: true } : { hasCompleted: false };
 }
 
 export class PublicRepository {
   private admin = createSupabaseAdminClient();
   async getTopic() { const { data } = await this.admin.from("topics").select("*").order("created_at").limit(1).maybeSingle(); return data ? topicOf(data) : { id: "default", ...defaultTopic }; }
-  async listNotices() { const topic = await this.getTopic(); const window = await snapshotWindow(this.admin); let query = this.admin.from("notices").select("*, attachments(*), topic_scores!left(analysis, topic_id, updated_at)").order("closes_at"); if (window.before) query = query.lt("updated_at", window.before); if (window.from) query = query.gte("updated_at", window.from); const { data, error } = await query; if (error) throw error; return (data ?? []).map((row: Row) => noticeOf({ ...row, topic_scores: (row.topic_scores as Row[] | undefined)?.filter((score) => score.topic_id === topic.id && typeof (score.analysis as Row | undefined)?.aiModel === "string") }, undefined, Boolean(window.before))); }
+  async listNotices() {
+    const topic = await this.getTopic();
+    const window = await snapshotWindow(this.admin);
+    const { data, error } = await this.admin.from("notices").select("*, attachments(*), topic_scores!left(analysis, topic_id, updated_at)").order("closes_at");
+    if (error) throw error;
+    return (data ?? []).map((row: Row) => {
+      // A collection pass updates notice.updated_at before analysis finishes.
+      // Therefore the public snapshot boundary must be applied to the score,
+      // not to the notice row, otherwise a failed run erases the prior result.
+      const scores = (row.topic_scores as Row[] | undefined)?.filter((score) => score.topic_id === topic.id && typeof (score.analysis as Row | undefined)?.aiModel === "string" && (!window.before || String(score.updated_at ?? "") < window.before));
+      return noticeOf({ ...row, topic_scores: scores }, undefined, Boolean(window.before && window.hasCompleted));
+    }).filter((notice) => window.hasCompleted && notice.analysis);
+  }
   async getNotice(id: string) { return (await this.listNotices()).find((notice) => notice.id === id); }
   async listNotifications(): Promise<Notification[]> { return []; }
   async listRuns(): Promise<BatchRun[]> { const { data, error } = await this.admin.from("batch_runs").select("*").order("started_at", { ascending: false }).limit(20); if (error) throw error; return (data ?? []).map(runOf); }
