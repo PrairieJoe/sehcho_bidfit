@@ -13,7 +13,7 @@ export async function runCollectionPass() {
   const now = new Date().toISOString();
   const rows = validNotices.map((notice) => {
     const sourceHash = JSON.stringify([notice.title, notice.closesAt, notice.status, notice.description]);
-    return { bid_number: notice.bidNumber, bid_order: notice.order, title: notice.title, business_type: notice.businessType, status: notice.status, agency: notice.agency, demand_agency: notice.demandAgency, region: notice.region, published_at: notice.publishedAt || null, closes_at: notice.closesAt, budget: notice.budget, budget_label: notice.budgetLabel, contract_method: notice.contractMethod, detail_url: notice.detailUrl, description: notice.description, tasks: notice.tasks, qualifications: notice.qualifications, change_summary: notice.changeSummary ?? null, source_hash: sourceHash, updated_at: now };
+    return { bid_number: notice.bidNumber, bid_order: notice.order, title: notice.title, business_type: notice.businessType, status: notice.status, agency: notice.agency, demand_agency: notice.demandAgency, region: notice.region, published_at: notice.publishedAt || null, closes_at: notice.closesAt || null, budget: notice.budget, budget_label: notice.budgetLabel, contract_method: notice.contractMethod, detail_url: notice.detailUrl, description: notice.description, tasks: notice.tasks, qualifications: notice.qualifications, change_summary: notice.changeSummary ?? null, source_hash: sourceHash, updated_at: now };
   });
   const savedRows: Record<string, any>[] = [];
   for (const part of chunk(rows, 50)) {
