@@ -18,12 +18,17 @@ async function recoverPendingAttachmentsWithTerminalJobs() {
   const admin = createSupabaseAdminClient();
   const { data, error } = await admin
     .from("processing_jobs")
-    .select("id, attachments!inner(status)")
+    .select("id, attachments!inner(status,name,failure_reason)")
     .in("status", ["완료", "실패"])
-    .eq("attachments.status", "대기")
     .limit(1_000);
   if (error) throw error;
-  const ids = (data ?? []).map((job: Row) => String(job.id));
+  const ids = (data ?? []).filter((job: Row) => {
+    const attachment = Array.isArray(job.attachments) ? job.attachments[0] : job.attachments;
+    const status = String(attachment?.status ?? "");
+    const name = String(attachment?.name ?? "").toLowerCase();
+    const reason = String(attachment?.failure_reason ?? "");
+    return status === "대기" || (name.endsWith(".hwp") && reason.includes("구형 HWP 텍스트 추출 HTTP 401"));
+  }).map((job: Row) => String(job.id));
   if (!ids.length) return 0;
   const { error: updateError } = await admin
     .from("processing_jobs")
