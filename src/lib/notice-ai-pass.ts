@@ -73,3 +73,19 @@ export async function processNoticeAiJob(aiJobId: string) {
     throw cause;
   }
 }
+
+/** Safety-net worker for hosts where Vercel Queue delivery is delayed. */
+export async function processPendingNoticeAiJobsInline(limit = 32) {
+  const admin = createSupabaseAdminClient();
+  const { data, error } = await admin.from("notice_ai_jobs").select("id").eq("status", "대기").order("created_at", { ascending: true }).limit(limit);
+  if (error) throw error;
+  let processed = 0;
+  for (let index = 0; index < (data ?? []).length; index += 4) {
+    const group = (data ?? []).slice(index, index + 4);
+    const results = await Promise.all(group.map(async (row) => {
+      try { await processNoticeAiJob(String(row.id)); return 1; } catch { return 0; }
+    }));
+    processed += results.reduce<number>((sum, value) => sum + value, 0);
+  }
+  return processed;
+}
