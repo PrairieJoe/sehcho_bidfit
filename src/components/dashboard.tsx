@@ -71,7 +71,7 @@ export function Dashboard({ initialNotices, initialTopic, initialNotifications, 
 
       <section className="content">
         <header className="topbar"><button className="icon-button mobile-menu" aria-label="메뉴"><Menu size={20} /></button><div className="crumb">나라장터 입찰공고 <ChevronRight size={15} /> <strong>{tab === "dashboard" ? "오늘의 분석" : tab === "notices" ? "전체 공고" : tab === "operations" ? "운영 현황" : "전체 공고"}</strong></div><div className="topbar-right"><span className="data-pill"><span className="live-dot" />나라장터 연계</span></div></header>
-        {tab === "dashboard" && <Overview notices={visibleNotices} eligible={eligible} topic={topic} onOpen={setSelected} onShowAll={() => setTab("notices")} isAdmin={isAdmin} latestRun={runs[0]} />}
+        {tab === "dashboard" && <Overview notices={visibleNotices} eligible={eligible} topic={topic} onOpen={setSelected} onShowAll={() => setTab("notices")} isAdmin={isAdmin} latestRun={runs[0]} previousRun={runs.find((run) => run.status === "완료")} />}
         {tab === "notices" && <NoticeList notices={filtered} query={query} typeFilter={typeFilter} onQuery={setQuery} onType={setTypeFilter} onOpen={setSelected} />}
         {tab === "operations" && isAdmin && <Operations runs={runs} notices={notices} />}
       </section>
@@ -85,16 +85,17 @@ function NavItem({ active, icon, label, badge, onClick }: { active: boolean; ico
   return <button className={`nav-item ${active ? "active" : ""}`} onClick={onClick}>{icon}<span>{label}</span>{badge && <em>{badge}</em>}</button>;
 }
 
-function Overview({ notices, eligible, topic, onOpen, onShowAll, isAdmin, latestRun }: { notices: BidNotice[]; eligible: BidNotice[]; topic: Topic; onOpen: (notice: BidNotice) => void; onShowAll: () => void; isAdmin: boolean; latestRun?: BatchRun }) {
-  const high = notices.filter((item) => (item.analysis?.score ?? 0) >= 85).length;
-  const analyzed = latestRun?.analyzed ?? notices.filter((item) => item.analysis).length;
-  const changed = notices.filter((item) => item.status === "정정" || item.status === "재공고").length;
+function Overview({ notices, eligible, topic, onOpen, onShowAll, isAdmin, latestRun, previousRun }: { notices: BidNotice[]; eligible: BidNotice[]; topic: Topic; onOpen: (notice: BidNotice) => void; onShowAll: () => void; isAdmin: boolean; latestRun?: BatchRun; previousRun?: BatchRun }) {
   const isRunning = latestRun?.status === "실행 중" || latestRun?.status === "분석 중";
+  const previousCompleted = isRunning ? previousRun : latestRun;
+  const high = notices.filter((item) => (item.analysis?.score ?? 0) >= 85).length;
+  const analyzed = isRunning ? notices.filter((item) => item.analysis).length : (latestRun?.analyzed ?? notices.filter((item) => item.analysis).length);
+  const changed = notices.filter((item) => item.status === "정정" || item.status === "재공고").length;
   const isPartial = latestRun?.status === "부분 완료";
   const statusText = !latestRun
     ? "첫 정기 업데이트를 기다리고 있습니다. 완료 전에는 공고 결과를 표시하지 않습니다."
     : isRunning
-      ? `오늘 ${time(latestRun.startedAt)}부터 공고를 수집하고 첨부문서를 분석하고 있습니다. 현재 배치에서 분석이 끝난 공고만 표시합니다.`
+      ? `오늘 ${time(latestRun.startedAt)}부터 공고를 수집하고 첨부문서를 분석하고 있습니다. ${previousCompleted ? "완료 전까지 이전 결과를 보여드립니다." : "첫 실행이라 분석 결과가 없습니다."}`
       : isPartial
         ? `오늘 업데이트가 끝까지 완료되지 않았습니다. ${latestRun.errorSummary ? `사유: ${latestRun.errorSummary}` : "마지막 정상 결과를 유지합니다."}`
           : latestRun.analyzed > 0
@@ -106,8 +107,8 @@ function Overview({ notices, eligible, topic, onOpen, onShowAll, isAdmin, latest
     <section className="title-row"><div><p className="eyebrow">매일 08:00~09:00 KST 정기 업데이트</p><h1>오늘의 입찰 기회</h1><p className="lede">최근 72시간의 용역 공고를 분석하고, <strong>{topic.name}</strong>와 가까운 공고를 우선 추천합니다.</p></div></section>
     <section className={`batch-status ${isRunning ? "running" : isPartial ? "failed" : "complete"}`}><div><strong>{isRunning ? "오늘의 분석 진행 중" : isPartial ? "오늘의 업데이트 확인 필요" : "오늘의 분석 결과"}</strong><p>{statusText}</p></div><span>{latestRun?.status ?? "대기"}</span></section>
     <section className="metric-grid">
-      <Metric icon={<FileText />} value={analyzed} label="분석 완료 공고" note="첨부문서 근거 확보 후 표시" />
-      <Metric icon={<Clock3 />} value={latestRun?.discovered ?? 0} label="이번 업데이트 수집" note="최근 72시간 중첩 조회" tone="orange" />
+      <Metric icon={<FileText />} value={isRunning && !previousCompleted ? "-" : analyzed} label="분석 완료 공고" note="첨부문서 근거 확보 후 표시" />
+      <Metric icon={<Clock3 />} value={isRunning ? (previousCompleted?.discovered ?? "-") : (latestRun?.discovered ?? "-")} label={isRunning ? "이전 업데이트 수집" : "이번 업데이트 수집"} note={isRunning ? "오늘 분석 완료 전까지 표시" : "최근 72시간 중첩 조회"} tone="orange" />
       <Metric icon={<Sparkles />} value={eligible.length} label={`${topic.threshold}점 이상 추천`} note={`관심 주제: ${topic.name}`} tone="blue" />
       <Metric icon={<Clock3 />} value={high} label="우선 검토 공고" note="85점 이상 · 매우 높음" tone="green" />
       <Metric icon={<CircleAlert />} value={changed} label="정정·재공고" note="변경 내용을 확인하세요" tone="orange" />
@@ -118,7 +119,7 @@ function Overview({ notices, eligible, topic, onOpen, onShowAll, isAdmin, latest
   </div>;
 }
 
-function Metric({ icon, value, label, note, tone = "" }: { icon: React.ReactNode; value: number; label: string; note: string; tone?: string }) { return <article className={`metric-card ${tone}`}><div className="metric-icon">{icon}</div><strong>{value}</strong><span>{label}</span><small>{note}</small></article>; }
+function Metric({ icon, value, label, note, tone = "" }: { icon: React.ReactNode; value: number | string; label: string; note: string; tone?: string }) { return <article className={`metric-card ${tone}`}><div className="metric-icon">{icon}</div><strong>{value}</strong><span>{label}</span><small>{note}</small></article>; }
 
 function NoticeCard({ notice, onOpen }: { notice: BidNotice; onOpen: () => void }) {
   const analysis = notice.analysis!;
