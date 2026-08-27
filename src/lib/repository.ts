@@ -30,7 +30,7 @@ const noticeOf = (row: Row, state?: Row, allowLegacyAnalysis = false): BidNotice
 };
 const runOf = (row: Row): BatchRun => ({ id: String(row.id), startedAt: String(row.started_at), completedAt: row.completed_at ? String(row.completed_at) : undefined, status: String(row.status) as BatchRun["status"], discovered: Number(row.discovered), changed: Number(row.changed), analyzed: Number(row.analyzed), notified: Number(row.notified), apiCalls: Number(row.api_calls), errorSummary: String(row.error_summary ?? "") || undefined });
 async function snapshotWindow(admin: ReturnType<typeof createSupabaseAdminClient>) {
-  const { data: completed } = await admin.from("batch_runs").select("started_at").eq("status", "완료").order("started_at", { ascending: false }).limit(1).maybeSingle();
+  const { data: completed } = await admin.from("batch_runs").select("id,started_at").eq("status", "완료").order("started_at", { ascending: false }).limit(1).maybeSingle();
   let incomplete: { started_at?: string } | null = null;
   if (completed?.started_at) {
     const { data } = await admin.from("batch_runs").select("started_at").neq("status", "완료").gt("started_at", String(completed.started_at)).order("started_at", { ascending: true }).limit(1).maybeSingle();
@@ -42,8 +42,8 @@ async function snapshotWindow(admin: ReturnType<typeof createSupabaseAdminClient
   // A failed/partial run has already updated notice rows, so using the latest
   // completed timestamp alone would expose that incomplete snapshot. Keep the
   // data strictly before the first incomplete run after the last completion.
-  if (incomplete?.started_at && (!completed?.started_at || String(incomplete.started_at) > String(completed.started_at))) return { after: completed?.started_at ? String(completed.started_at) : undefined, before: String(incomplete.started_at), hasCompleted: Boolean(completed?.started_at) };
-  return completed?.started_at ? { after: String(completed.started_at), hasCompleted: true } : { hasCompleted: false };
+  if (incomplete?.started_at && (!completed?.started_at || String(incomplete.started_at) > String(completed.started_at))) return { completedId: completed?.id ? String(completed.id) : undefined, after: completed?.started_at ? String(completed.started_at) : undefined, before: String(incomplete.started_at), hasCompleted: Boolean(completed?.started_at) };
+  return completed?.started_at ? { completedId: completed.id ? String(completed.id) : undefined, after: String(completed.started_at), hasCompleted: true } : { hasCompleted: false };
 }
 
 export class PublicRepository {
@@ -61,7 +61,11 @@ export class PublicRepository {
       // A collection pass updates notice.updated_at before analysis finishes.
       // Therefore the public snapshot boundary must be applied to the score,
       // not to the notice row, otherwise a failed run erases the prior result.
-      const scores = (row.topic_scores as Row[] | undefined)?.filter((score) => score.topic_id === topic.id && typeof (score.analysis as Row | undefined)?.aiModel === "string" && (!window.after || String(score.updated_at ?? "") >= window.after) && (!window.before || String(score.updated_at ?? "") < window.before));
+      const scores = (row.topic_scores as Row[] | undefined)?.filter((score) => {
+        const analysis = score.analysis as Row | undefined;
+        const samePublishedBatch = window.completedId && analysis?.batchId ? String(analysis.batchId) === window.completedId : true;
+        return score.topic_id === topic.id && typeof analysis?.aiModel === "string" && samePublishedBatch && (!window.after || String(score.updated_at ?? "") >= window.after) && (!window.before || String(score.updated_at ?? "") < window.before);
+      });
       return noticeOf({ ...row, topic_scores: scores }, undefined, Boolean(window.before && window.hasCompleted));
     }).filter((notice) => window.hasCompleted && notice.analysis);
   }

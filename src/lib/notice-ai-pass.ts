@@ -100,7 +100,7 @@ export async function enqueueReadyNoticeAiJobs(options: { publish?: boolean; not
   return { aiQueued };
 }
 
-export async function processNoticeAiJob(aiJobId: string) {
+export async function processNoticeAiJob(aiJobId: string, batchId?: string) {
   const admin = createSupabaseAdminClient();
   const { data: job, error } = await admin.from("notice_ai_jobs").select("*").eq("id", aiJobId).maybeSingle();
   if (error) throw error;
@@ -118,9 +118,10 @@ export async function processNoticeAiJob(aiJobId: string) {
     }
     const { data: topics, error: topicError } = await admin.from("topics").select("*").limit(10);
     if (topicError) throw topicError;
+    const activeBatch = batchId ? { id: batchId } : (await admin.from("batch_runs").select("id").in("status", ["실행 중", "분석 중"]).order("started_at", { ascending: false }).limit(1).maybeSingle()).data;
     for (const topicRow of topics ?? []) {
       const topic = topicOf(topicRow);
-      const analysis = { ...await analyzeWithGemini(notice, topic), sourceHash: String(row.source_hash ?? "") };
+      const analysis = { ...await analyzeWithGemini(notice, topic), sourceHash: String(row.source_hash ?? ""), batchId: activeBatch?.id ? String(activeBatch.id) : undefined };
       const { error: scoreError } = await admin.from("topic_scores").upsert({ topic_id: topic.id, notice_id: notice.id, analysis, score: analysis.score, updated_at: new Date().toISOString() }, { onConflict: "topic_id,notice_id" });
       if (scoreError) throw scoreError;
     }
@@ -143,11 +144,12 @@ export async function processPendingNoticeAiJobsInline(limit = 32) {
   const admin = createSupabaseAdminClient();
   const { data, error } = await admin.from("notice_ai_jobs").select("id").eq("status", "대기").order("created_at", { ascending: true }).limit(limit);
   if (error) throw error;
+  const { data: activeBatch } = await admin.from("batch_runs").select("id").in("status", ["실행 중", "분석 중"]).order("started_at", { ascending: false }).limit(1).maybeSingle();
   let processed = 0;
   for (let index = 0; index < (data ?? []).length; index += 4) {
     const group = (data ?? []).slice(index, index + 4);
     const results = await Promise.all(group.map(async (row) => {
-      try { await processNoticeAiJob(String(row.id)); return 1; } catch { return 0; }
+      try { await processNoticeAiJob(String(row.id), activeBatch?.id ? String(activeBatch.id) : undefined); return 1; } catch { return 0; }
     }));
     processed += results.reduce<number>((sum, value) => sum + value, 0);
     console.log(`[Gemini] 진행 ${Math.min(index + group.length, data?.length ?? 0)}/${data?.length ?? 0}`);
