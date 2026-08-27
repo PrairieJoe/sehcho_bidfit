@@ -67,7 +67,7 @@ export async function processPendingAttachmentJobsInline(limit = 40) {
     const results = await Promise.all(group.map(async (row) => {
       try { await processQueuedAttachmentJob(String(row.id)); return 1; } catch { return 0; }
     }));
-    processed += results.reduce((sum, value) => sum + value, 0);
+    processed += results.reduce<number>((sum, value) => sum + value, 0);
   }
   return processed;
 }
