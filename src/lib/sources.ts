@@ -23,6 +23,20 @@ function requestDate(date: Date) {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(date).reduce<Record<string, string>>((memo, part) => ({ ...memo, [part.type]: part.value }), {});
   return `${parts.year}${parts.month}${parts.day}${parts.hour}${parts.minute}`;
 }
+async function fetchApiPage(url: URL, businessType: string) {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const response = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(30_000) });
+      if (!response.ok) throw new Error(`나라장터 ${businessType} 목록 조회 실패 (${response.status})`);
+      return await response.json() as { response?: { header?: { resultCode?: string | number; resultMsg?: string }; body?: { items?: { item?: Record<string, unknown> | Record<string, unknown>[] } | Record<string, unknown>[]; totalCount?: number } } };
+    } catch (error) {
+      lastError = error;
+      if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 2_000));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(`나라장터 ${businessType} 목록 조회 실패`);
+}
 function statusOf(item: Record<string, unknown>, closesAt: string): NoticeStatus {
   if (value(item, "reNtceYn", "rePblancYn") === "Y") return "재공고";
   if (value(item, "bidNtceKindNm", "ntceKindNm").includes("정정")) return "정정";
@@ -71,9 +85,7 @@ export class NarajangteoBidSource implements BidSource {
       for (let pageNo = 1; ; pageNo += 1) {
       const url = new URL(`${BASE_URL}/${endpoint}`);
       [["serviceKey", serviceKey], ["type", "json"], ["numOfRows", String(PAGE_SIZE)], ["pageNo", String(pageNo)], ["inqryDiv", "1"], ["inqryBgnDt", requestDate(windowStart)], ["inqryEndDt", requestDate(windowEnd)]].forEach(([key, entry]) => url.searchParams.set(key, entry));
-      const response = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(20_000) });
-      if (!response.ok) throw new Error(`나라장터 ${businessType} 목록 조회 실패 (${response.status})`);
-      const payload = await response.json() as { response?: { header?: { resultCode?: string | number; resultMsg?: string }; body?: { items?: { item?: Record<string, unknown> | Record<string, unknown>[] } | Record<string, unknown>[]; totalCount?: number } } };
+      const payload = await fetchApiPage(url, businessType);
       const header = payload.response?.header;
       if (header && String(header.resultCode ?? "00") !== "00") throw new Error(`나라장터 ${businessType} API 오류 (${header.resultCode}): ${header.resultMsg ?? "응답 오류"}`);
       const body = payload.response?.body;
