@@ -12,6 +12,10 @@ export type NoticeAiQueueMessage = { aiJobId: string };
 const topicOf = (row: Row): Topic => ({ id: String(row.id), name: String(row.name), description: String(row.description ?? ""), capabilities: String(row.capabilities ?? ""), includeKeywords: list(row.include_keywords), excludeKeywords: list(row.exclude_keywords), businessTypes: list(row.business_types) as Topic["businessTypes"], regions: list(row.regions), minBudget: row.min_budget == null ? null : Number(row.min_budget), maxBudget: row.max_budget == null ? null : Number(row.max_budget), minimumDays: Number(row.minimum_days ?? 0), threshold: Number(row.threshold ?? 70) });
 const noticeOf = (row: Row): BidNotice => ({ id: String(row.id), bidNumber: String(row.bid_number), order: String(row.bid_order), title: String(row.title), businessType: String(row.business_type) as BidNotice["businessType"], status: String(row.status) as BidNotice["status"], agency: String(row.agency), demandAgency: String(row.demand_agency), region: String(row.region), publishedAt: String(row.published_at ?? ""), closesAt: String(row.closes_at ?? ""), budget: row.budget == null ? null : Number(row.budget), budgetLabel: String(row.budget_label), contractMethod: String(row.contract_method), detailUrl: String(row.detail_url), description: String(row.description), tasks: list(row.tasks), qualifications: list(row.qualifications), attachments: (row.attachments ?? []).map((item: Row) => ({ id: String(item.id), name: String(item.name), kind: String(item.kind), status: String(item.status) as BidNotice["attachments"][number]["status"], extractedText: String((Array.isArray(item.attachment_texts) ? item.attachment_texts[0] : item.attachment_texts)?.extracted_text ?? "") || undefined })), reviewState: "검토 전" });
 
+function inputHashOf(analyzerVersion: string, notice: Row, attachments: Row[]) {
+  return createHash("sha256").update(`${analyzerVersion}|${String(notice.title ?? "")}|${String(notice.description ?? "")}|${attachments.map((item) => `${item.id}:${item.sha256 ?? ""}:${String((Array.isArray(item.attachment_texts) ? item.attachment_texts[0] : item.attachment_texts)?.extracted_text ?? "").length}`).sort().join("|")}`, "utf8").digest("hex");
+}
+
 export async function enqueueNoticeAiWhenReady(noticeId: string, delaySeconds = 0, publish = true) {
   // A missing key must never silently produce a keyword-based score.
   if (!process.env.GEMINI_API_KEY) return { queued: false, reason: "Gemini API 키가 설정되지 않았습니다." };
@@ -34,7 +38,7 @@ export async function enqueueNoticeAiWhenReady(noticeId: string, delaySeconds = 
     return { queued: false, reason: allAttachmentsReady ? "첨부문서 처리가 아직 끝나지 않았습니다." : "모든 첨부문서의 텍스트 추출이 완료되지 않았습니다." };
   }
   const analyzerVersion = `gemini:${process.env.GEMINI_MODEL ?? "gemini-3.5-flash-lite"}`;
-  const inputHash = createHash("sha256").update(`${analyzerVersion}|${String(noticeMeta?.title ?? "")}|${String(noticeMeta?.description ?? "")}|${rows.map((item: Row) => `${item.id}:${item.sha256 ?? ""}:${String((Array.isArray(item.attachment_texts) ? item.attachment_texts[0] : item.attachment_texts)?.extracted_text ?? "").length}`).sort().join("|")}`, "utf8").digest("hex");
+  const inputHash = inputHashOf(analyzerVersion, noticeMeta ?? {}, rows);
   const { data: inserted, error: jobError } = await admin.from("notice_ai_jobs").upsert({ notice_id: noticeId, input_hash: inputHash, status: "대기" }, { onConflict: "notice_id,input_hash", ignoreDuplicates: true }).select("id,status").maybeSingle();
   if (jobError) throw jobError;
   const job = inserted ?? (await admin.from("notice_ai_jobs").select("id,status").eq("notice_id", noticeId).eq("input_hash", inputHash).maybeSingle()).data;
@@ -52,23 +56,46 @@ export async function enqueueReadyNoticeAiJobs(options: { publish?: boolean; not
   // explicit title/description fallback in analyzeWithGemini. The previous
   // attachment-only scan silently excluded no-attachment notices and made the
   // dashboard report a misleading zero.
-  let query = admin.from("notices").select("id,attachments(id,status,attachment_texts(extracted_text))").order("updated_at", { ascending: false }).limit(5_000);
+  let query = admin.from("notices").select("id,title,description,attachments(id,status,sha256,attachment_texts(extracted_text))").order("updated_at", { ascending: false }).limit(5_000);
   if (options.noticeIds?.length) query = query.in("id", options.noticeIds);
   const { data, error } = await query;
   if (error) throw error;
-  const noticeIds = (data ?? []).filter((row: Row) => {
+  const analyzerVersion = `gemini:${process.env.GEMINI_MODEL ?? "gemini-3.5-flash-lite"}`;
+  const readyRows = (data ?? []).filter((row: Row) => {
     const attachments = Array.isArray(row.attachments) ? row.attachments : [];
     return attachments.length === 0 || attachments.every((item: Row) => item.status === "분석 완료" && String((Array.isArray(item.attachment_texts) ? item.attachment_texts[0] : item.attachment_texts)?.extracted_text ?? "").trim());
-  }).map((row: Row) => String(row.id));
+  }).map((row: Row) => ({ noticeId: String(row.id), inputHash: inputHashOf(analyzerVersion, row, Array.isArray(row.attachments) ? row.attachments : []) }));
+  if (!readyRows.length) return { aiQueued: 0 };
+
+  // Register the whole ready set in bounded upsert batches. The former
+  // implementation performed two reads and one upsert per notice; with a
+  // 72-hour service window of 1,600+ notices that exhausted Supabase and
+  // stopped the batch before Gemini was ever called.
+  for (let index = 0; index < readyRows.length; index += 50) {
+    const part = readyRows.slice(index, index + 50).map((row) => ({ notice_id: row.noticeId, input_hash: row.inputHash, status: "대기" }));
+    const { error: upsertError } = await admin.from("notice_ai_jobs").upsert(part, { onConflict: "notice_id,input_hash", ignoreDuplicates: true });
+    if (upsertError) throw upsertError;
+  }
   let aiQueued = 0;
-  // Keep a small rolling concurrency window for the free Gemini tier. A linear
-  // delay per notice made the tail of a recovery run take tens of minutes.
-  for (let index = 0; index < noticeIds.length; index += 8) {
-    const group = noticeIds.slice(index, index + 8);
-    // Do not swallow enqueue errors. A silently skipped notice used to make a
-    // batch look complete while its score was never generated.
-    const results = await Promise.all(group.map((noticeId) => enqueueNoticeAiWhenReady(noticeId, 0, options.publish ?? true)));
-    aiQueued += results.filter((result) => result.queued).length;
+  // Read back only the matching jobs, then publish in a small queue window.
+  // The worker path uses publish=false and therefore avoids thousands of queue
+  // network calls while still leaving every job durable in Supabase.
+  for (let index = 0; index < readyRows.length; index += 100) {
+    const part = readyRows.slice(index, index + 100);
+    const { data: jobs, error: jobsError } = await admin.from("notice_ai_jobs").select("id,notice_id,input_hash,status").in("notice_id", part.map((row) => row.noticeId));
+    if (jobsError) throw jobsError;
+    const matching = (jobs ?? []).filter((job: Row) => part.some((row) => row.noticeId === String(job.notice_id) && row.inputHash === String(job.input_hash) && job.status !== "완료"));
+    const retryIds = matching.filter((job: Row) => job.status === "실패").map((job: Row) => String(job.id));
+    if (retryIds.length) {
+      const { error: retryError } = await admin.from("notice_ai_jobs").update({ status: "대기", failure_reason: null, updated_at: new Date().toISOString() }).in("id", retryIds);
+      if (retryError) throw retryError;
+    }
+    if (options.publish ?? true) {
+      for (let offset = 0; offset < matching.length; offset += 8) {
+        await Promise.all(matching.slice(offset, offset + 8).map((job: Row) => send<NoticeAiQueueMessage>(NOTICE_AI_QUEUE_TOPIC, { aiJobId: String(job.id) }, { idempotencyKey: `${String(job.notice_id)}:${String(job.input_hash)}`, retentionSeconds: 86_400 })));
+      }
+    }
+    aiQueued += matching.length;
   }
   return { aiQueued };
 }
