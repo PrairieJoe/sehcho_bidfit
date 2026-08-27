@@ -29,10 +29,10 @@ export function Dashboard({ initialNotices, initialTopic, initialNotifications, 
   const visibleNotices = notices.filter((notice) => notice.analysis);
   const candidatePendingCount = notices.filter((notice) => !notice.analysis && isTitleCandidate(notice, topic)).length;
 
-  const filtered = useMemo(() => visibleNotices
+  const filtered = useMemo(() => notices
     .filter((notice) => typeFilter === "전체" || notice.businessType === typeFilter)
     .filter((notice) => `${notice.title} ${notice.agency} ${notice.demandAgency}`.toLowerCase().includes(query.toLowerCase()))
-    .sort((a, b) => (b.analysis?.score ?? 0) - (a.analysis?.score ?? 0) || new Date(a.closesAt).getTime() - new Date(b.closesAt).getTime()), [visibleNotices, query, typeFilter]);
+    .sort((a, b) => (b.analysis ? 1 : 0) - (a.analysis ? 1 : 0) || (b.analysis?.score ?? 0) - (a.analysis?.score ?? 0) || new Date(a.closesAt).getTime() - new Date(b.closesAt).getTime()), [notices, query, typeFilter]);
 
   const eligible = visibleNotices.filter((notice) => notice.analysis && notice.analysis.score >= topic.threshold && notice.status !== "마감");
 
