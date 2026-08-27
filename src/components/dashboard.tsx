@@ -97,7 +97,7 @@ function Overview({ notices, pendingCount = 0, eligible, topic, onOpen, onShowAl
   const statusText = !latestRun
     ? "첫 정기 업데이트를 기다리고 있습니다. 완료 전에는 공고 결과를 표시하지 않습니다."
     : isRunning
-      ? `오늘 ${time(latestRun.startedAt)}부터 공고를 수집하고 첨부문서를 분석하고 있습니다. 이전에 완료된 결과를 계속 보여드립니다.`
+      ? `오늘 ${time(latestRun.startedAt)}부터 공고를 수집하고 첨부문서를 분석하고 있습니다. 현재 배치에서 분석이 끝난 공고만 표시합니다.`
       : isPartial
         ? `오늘 업데이트가 끝까지 완료되지 않았습니다. ${latestRun.errorSummary ? `사유: ${latestRun.errorSummary}` : "마지막 정상 결과를 유지합니다."}`
         : latestRun.analyzed > 0
