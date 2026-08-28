@@ -112,29 +112,42 @@ export async function processQueuedAttachmentJob(jobId: string, options: { publi
   if (job.status === "완료" || job.status === "보류") return { skipped: true, reason: "이미 처리된 작업입니다." };
   const attachment = (Array.isArray(job.attachments) ? job.attachments[0] : job.attachments) as Row | undefined;
   if (!attachment) throw new Error("첨부파일 정보를 찾을 수 없습니다.");
-
-  if (job.status !== "처리 중" || !options.allowInFlight) {
-    const { data: claimed, error: claimError } = await admin.from("processing_jobs").update({ status: "처리 중", attempts: Number(job.attempts) + 1, updated_at: new Date().toISOString() }).eq("id", jobId).in("status", ["대기", "실패"]).select("id").maybeSingle();
-    if (claimError) throw claimError;
-    if (!claimed) return { skipped: true, reason: "다른 작업자가 이미 처리 중입니다." };
+  try {
+    if (job.status !== "처리 중" || !options.allowInFlight) {
+      const { data: claimed, error: claimError } = await admin.from("processing_jobs").update({ status: "처리 중", attempts: Number(job.attempts) + 1, updated_at: new Date().toISOString() }).eq("id", jobId).in("status", ["대기", "실패"]).select("id").maybeSingle();
+      if (claimError) throw new Error(`첨부 작업 claim 실패: ${claimError.message}`);
+      if (!claimed) return { skipped: true, reason: "다른 작업자가 이미 처리 중입니다." };
+    }
+    const processed = await processAttachment(String(attachment.notice_id), {
+      id: String(attachment.id), name: String(attachment.name), kind: String(attachment.kind),
+      status: String(attachment.status) as Attachment["status"], sourceUrl: String(attachment.source_url ?? ""),
+    });
+    // HWP extraction can contain NUL bytes. PostgreSQL text rejects them with
+    // 22P05, which otherwise strands the processing job in "처리 중" forever.
+    const extractedText = processed.extractedText?.replace(/\u0000/g, "");
+    // Persist the text before declaring the attachment ready. A text-write
+    // failure must not make the Gemini readiness gate see a false success.
+    if (extractedText) {
+      const { error: textError } = await admin.from("attachment_texts").upsert({ attachment_id: attachment.id, extracted_text: extractedText, page_map: [], extractor_version: "temporary-text-v1" });
+      if (textError) throw new Error(`첨부 텍스트 저장 실패: ${textError.message}`);
+    }
+    const { error: attachmentError } = await admin.from("attachments").update({ status: processed.status, storage_path: null, pages: processed.pages ?? null, sha256: extractedText ? createHash("sha256").update(extractedText, "utf8").digest("hex") : null, failure_reason: processed.failureReason ?? null, updated_at: new Date().toISOString() }).eq("id", attachment.id);
+    if (attachmentError) throw new Error(`첨부 상태 저장 실패: ${attachmentError.message}`);
+    const terminal = processed.status === "분석 완료" || processed.status === "부분 분석" || processed.status === "보류";
+    const { error: jobUpdateError } = await admin.from("processing_jobs").update({ status: terminal ? "완료" : "실패", failure_reason: processed.failureReason ?? null, updated_at: new Date().toISOString() }).eq("id", jobId);
+    if (jobUpdateError) throw new Error(`첨부 작업 완료 상태 저장 실패: ${jobUpdateError.message}`);
+    const ai = await enqueueNoticeAiWhenReady(String(attachment.notice_id), 0, options.publishAiQueue ?? true);
+    await finishActiveBatchIfDrained();
+    return { skipped: false, attachmentStatus: processed.status, aiQueued: ai.queued };
+  } catch (cause) {
+    const reason = cause instanceof Error ? cause.message : "첨부파일 처리 중 알 수 없는 오류";
+    // A failed persistence step previously left the claimed job in "처리 중"
+    // forever, which made every GitHub Actions retry stall on the same file.
+    await admin.from("attachments").update({ status: "추출 실패", failure_reason: reason, updated_at: new Date().toISOString() }).eq("id", attachment.id);
+    await admin.from("processing_jobs").update({ status: "실패", failure_reason: reason, updated_at: new Date().toISOString() }).eq("id", jobId);
+    await finishActiveBatchIfDrained();
+    throw cause;
   }
-  const processed = await processAttachment(String(attachment.notice_id), {
-    id: String(attachment.id), name: String(attachment.name), kind: String(attachment.kind),
-    status: String(attachment.status) as Attachment["status"], sourceUrl: String(attachment.source_url ?? ""),
-  });
-  // HWP extraction can contain NUL bytes. PostgreSQL text rejects them with
-  // 22P05, which otherwise strands the processing job in "처리 중" forever.
-  const extractedText = processed.extractedText?.replace(/\u0000/g, "");
-  await admin.from("attachments").update({ status: processed.status, storage_path: null, pages: processed.pages ?? null, sha256: extractedText ? createHash("sha256").update(extractedText, "utf8").digest("hex") : null, failure_reason: processed.failureReason ?? null, updated_at: new Date().toISOString() }).eq("id", attachment.id);
-  if (extractedText) {
-    const { error: textError } = await admin.from("attachment_texts").upsert({ attachment_id: attachment.id, extracted_text: extractedText, page_map: [], extractor_version: "temporary-text-v1" });
-    if (textError) throw textError;
-  }
-  const terminal = processed.status === "분석 완료" || processed.status === "부분 분석" || processed.status === "보류";
-  await admin.from("processing_jobs").update({ status: terminal ? "완료" : "실패", failure_reason: processed.failureReason ?? null, updated_at: new Date().toISOString() }).eq("id", jobId);
-  const ai = await enqueueNoticeAiWhenReady(String(attachment.notice_id), 0, options.publishAiQueue ?? true);
-  await finishActiveBatchIfDrained();
-  return { skipped: false, attachmentStatus: processed.status, aiQueued: ai.queued };
 }
 
 export async function finishActiveBatchIfDrained() {
