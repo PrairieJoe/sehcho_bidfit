@@ -8,7 +8,9 @@ type Tab = "dashboard" | "notices" | "notifications" | "operations";
 type Props = { initialNotices: BidNotice[]; initialTopic: Topic; initialNotifications: Notification[]; initialRuns: BatchRun[]; userEmail: string; isAdmin: boolean };
 
 const money = (value: number | null) => value ? `${(value / 100_000_000).toFixed(value >= 1_000_000_000 ? 1 : 2).replace(/\.0$/, "")}억원` : "금액 미정";
-const time = (value: string) => value && !Number.isNaN(new Date(value).getTime()) ? new Intl.DateTimeFormat("ko-KR", { month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value)) : "확인 필요";
+// The server renders in UTC while the public browser is typically KST.
+// Pinning the display zone prevents a hydration mismatch in date text.
+const time = (value: string) => value && !Number.isNaN(new Date(value).getTime()) ? new Intl.DateTimeFormat("ko-KR", { timeZone: "Asia/Seoul", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value)) : "확인 필요";
 const daysLeft = (value: string) => value && !Number.isNaN(new Date(value).getTime()) ? Math.ceil((new Date(value).getTime() - Date.now()) / 86_400_000) : 0;
 const scoreTone = (score: number) => score >= 85 ? "score-excellent" : score >= 70 ? "score-high" : score >= 50 ? "score-medium" : "score-low";
 const pendingAnalysis: AnalysisResult = { score: 0, grade: "낮음", confidence: "낮음", eligibilityStatus: "확인 필요", summary: "아직 분석 결과가 생성되지 않았습니다.", components: [], positiveReasons: [], penalties: [], uncertainties: ["이번 수집분에서 첨부문서 키워드 근거가 확보되면 결과가 표시됩니다."] };
