@@ -82,7 +82,10 @@ export async function runGithubActionsBatch() {
     let idleCycles = 0;
     for (let cycle = 0; cycle < 1_000; cycle += 1) {
       console.log(`[Batch] cycle=${cycle + 1} attachmentProcessed=${attachmentProcessed} aiProcessed=${aiProcessed}`);
-      const cycleAttachmentProcessed = await processPendingAttachmentJobsInline(40, false, undefined, collection.noticeIds);
+      // GitHub Actions is the authoritative drain for this run. Reclaim any
+      // current-batch claims left by delayed Vercel Queue consumers before
+      // each cycle so those claims cannot strand the daily snapshot.
+      const cycleAttachmentProcessed = await processPendingAttachmentJobsInline(40, false, undefined, collection.noticeIds, true);
       const cycleAiProcessed = await processPendingNoticeAiJobsInline(4, undefined, collection.noticeIds, false, String(started.id));
       attachmentProcessed += cycleAttachmentProcessed;
       aiProcessed += cycleAiProcessed;
