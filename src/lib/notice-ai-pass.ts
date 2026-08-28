@@ -154,7 +154,7 @@ export async function processNoticeAiJob(aiJobId: string, batchId?: string) {
 }
 
 /** Safety-net worker for hosts where Vercel Queue delivery is delayed. */
-export async function processPendingNoticeAiJobsInline(limit = 32, createdSince?: string, noticeIds?: string[], resetCurrentInFlight = false) {
+export async function processPendingNoticeAiJobsInline(limit = 32, createdSince?: string, noticeIds?: string[], resetCurrentInFlight = false, batchId?: string) {
   const admin = createSupabaseAdminClient();
   if (noticeIds?.length) {
     const staleBefore = new Date(Date.now() - 60_000).toISOString();
@@ -189,7 +189,7 @@ export async function processPendingNoticeAiJobsInline(limit = 32, createdSince?
   for (let index = 0; index < (data ?? []).length; index += 4) {
     const group = (data ?? []).slice(index, index + 4);
     const results = await Promise.all(group.map(async (row) => {
-      try { await processNoticeAiJob(String(row.id), activeBatch?.id ? String(activeBatch.id) : undefined); return 1; } catch { return 0; }
+      try { await processNoticeAiJob(String(row.id), batchId ?? (activeBatch?.id ? String(activeBatch.id) : undefined)); return 1; } catch { return 0; }
     }));
     processed += results.reduce<number>((sum, value) => sum + value, 0);
     console.log(`[Gemini] 진행 ${Math.min(index + group.length, data?.length ?? 0)}/${data?.length ?? 0}`);

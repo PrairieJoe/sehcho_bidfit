@@ -38,7 +38,7 @@ export async function runDailyBatch() {
     const queue = await enqueuePendingAttachmentJobs(40);
     const inlineProcessed = await processPendingAttachmentJobsInline(16);
     const aiQueue = await enqueueReadyNoticeAiJobs();
-    const inlineAiProcessed = await processPendingNoticeAiJobsInline(8);
+    const inlineAiProcessed = await processPendingNoticeAiJobsInline(8, undefined, undefined, false, String(started.id));
     const result = { ...collection, ...queue, ...aiQueue, inlineProcessed, inlineAiProcessed, analyzed: inlineAiProcessed };
     const { error: finishError } = await admin.from("batch_runs").update({
       status: queue.attachmentQueued || aiQueue.aiQueued ? "분석 중" : "완료", completed_at: queue.attachmentQueued || aiQueue.aiQueued ? null : new Date().toISOString(), discovered: result.discovered,
@@ -82,7 +82,7 @@ export async function runGithubActionsBatch() {
     for (let cycle = 0; cycle < 1_000; cycle += 1) {
       console.log(`[Batch] cycle=${cycle + 1} attachmentProcessed=${attachmentProcessed} aiProcessed=${aiProcessed}`);
       attachmentProcessed += await processPendingAttachmentJobsInline(40, false, undefined, collection.noticeIds);
-      aiProcessed += await processPendingNoticeAiJobsInline(4, undefined, collection.noticeIds);
+      aiProcessed += await processPendingNoticeAiJobsInline(4, undefined, collection.noticeIds, false, String(started.id));
       const [pendingAttachments, pendingAi] = await Promise.all([
         countCurrentJobs(admin, "processing_jobs", collection.noticeIds, ["대기", "처리 중"], true),
         countCurrentJobs(admin, "notice_ai_jobs", collection.noticeIds, ["대기", "처리 중"]),
@@ -92,7 +92,9 @@ export async function runGithubActionsBatch() {
       if (attachmentProcessed === 0 && aiProcessed === 0) await new Promise((resolve) => setTimeout(resolve, 2_000));
     }
     await finishActiveBatchIfDrained();
-    const { count: analyzed } = await admin.from("topic_scores").select("id", { count: "exact", head: true }).gte("updated_at", String(started.started_at));
+    const { data: analyzedRows, error: analyzedError } = await admin.from("topic_scores").select("id,analysis").gte("updated_at", String(started.started_at));
+    if (analyzedError) throw analyzedError;
+    const analyzed = (analyzedRows ?? []).filter((row: any) => String(row.analysis?.batchId ?? "") === String(started.id)).length;
     const [remainingAttachments, remainingAi, failedAttachments, failedAi] = await Promise.all([
       countCurrentJobs(admin, "processing_jobs", collection.noticeIds, ["대기", "처리 중"], true),
       countCurrentJobs(admin, "notice_ai_jobs", collection.noticeIds, ["대기", "처리 중"]),
@@ -101,8 +103,8 @@ export async function runGithubActionsBatch() {
     ]);
     const complete = (remainingAttachments ?? 0) === 0 && (remainingAi ?? 0) === 0 && (failedAttachments ?? 0) === 0 && (failedAi ?? 0) === 0;
     const errorSummary = complete ? null : `처리 미완료: 대기 첨부 ${remainingAttachments}건·대기 AI ${remainingAi}건·실패 첨부 ${failedAttachments}건·실패 AI ${failedAi}건`;
-    await admin.from("batch_runs").update({ status: complete ? "완료" : "부분 완료", completed_at: new Date().toISOString(), discovered: collection.discovered, changed: collection.changed, analyzed: analyzed ?? 0, api_calls: collection.queryCount, window_start: collection.windowStart, window_end: collection.windowEnd, window_hours: collection.windowHours, error_summary: errorSummary }).eq("id", started.id);
-    return { ...collection, attachmentProcessed, aiProcessed, analyzed: analyzed ?? 0, complete };
+    await admin.from("batch_runs").update({ status: complete ? "완료" : "부분 완료", completed_at: new Date().toISOString(), discovered: collection.discovered, changed: collection.changed, analyzed, api_calls: collection.queryCount, window_start: collection.windowStart, window_end: collection.windowEnd, window_hours: collection.windowHours, error_summary: errorSummary }).eq("id", started.id);
+    return { ...collection, attachmentProcessed, aiProcessed, analyzed, complete };
   } catch (error) {
     await admin.from("batch_runs").update({ status: "부분 완료", completed_at: new Date().toISOString(), error_summary: error instanceof Error ? error.message : "작업자 실행 실패" }).eq("id", started.id);
     throw error;
