@@ -56,10 +56,24 @@ export async function enqueueReadyNoticeAiJobs(options: { publish?: boolean; not
   // explicit title/description fallback in analyzeWithGemini. The previous
   // attachment-only scan silently excluded no-attachment notices and made the
   // dashboard report a misleading zero.
-  let query = admin.from("notices").select("id,title,description,attachments(id,status,sha256,attachment_texts(extracted_text))").order("updated_at", { ascending: false }).limit(5_000);
-  if (options.noticeIds?.length) query = query.in("id", options.noticeIds);
-  const { data, error } = await query;
-  if (error) throw error;
+  const data: Row[] = [];
+  if (options.noticeIds?.length) {
+    // Supabase REST encodes `.in()` values in the request URL. A daily
+    // 24-hour window can still contain hundreds of notices, so keep each
+    // filtered read below the proxy/header limit.
+    for (let index = 0; index < options.noticeIds.length; index += 100) {
+      const { data: part, error } = await admin
+        .from("notices")
+        .select("id,title,description,attachments(id,status,sha256,attachment_texts(extracted_text))")
+        .in("id", options.noticeIds.slice(index, index + 100));
+      if (error) throw error;
+      data.push(...(part ?? []));
+    }
+  } else {
+    const { data: part, error } = await admin.from("notices").select("id,title,description,attachments(id,status,sha256,attachment_texts(extracted_text))").order("updated_at", { ascending: false }).limit(5_000);
+    if (error) throw error;
+    data.push(...(part ?? []));
+  }
   const analyzerVersion = `gemini:${process.env.GEMINI_MODEL ?? "gemini-3.5-flash-lite"}`;
   const readyRows = (data ?? []).filter((row: Row) => {
     const attachments = Array.isArray(row.attachments) ? row.attachments : [];
