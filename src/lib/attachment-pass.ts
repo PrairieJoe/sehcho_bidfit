@@ -80,7 +80,8 @@ export async function processPendingAttachmentJobsInline(limit = 40, publishAiQu
   let data: Row[] = [];
   if (noticeIds?.length) {
     for (let index = 0; index < noticeIds.length && data.length < limit; index += 100) {
-      const { data: part, error } = await admin.from("processing_jobs").select("id,attachments!inner(notice_id)").eq("status", "대기").in("attachments.notice_id", noticeIds.slice(index, index + 100)).order("created_at", { ascending: true }).limit(limit - data.length);
+      let partQuery = admin.from("processing_jobs").select("id,attachments!inner(notice_id)").in("status", resetCurrentInFlight ? ["대기", "처리 중"] : ["대기"]).in("attachments.notice_id", noticeIds.slice(index, index + 100)).order("created_at", { ascending: true }).limit(limit - data.length);
+      const { data: part, error } = await partQuery;
       if (error) throw error;
       data.push(...(part ?? []));
     }
@@ -95,7 +96,7 @@ export async function processPendingAttachmentJobsInline(limit = 40, publishAiQu
   for (let index = 0; index < (data ?? []).length; index += 8) {
     const group = (data ?? []).slice(index, index + 8);
     const results = await Promise.all(group.map(async (row) => {
-      try { await processQueuedAttachmentJob(String(row.id), { publishAiQueue }); return 1; } catch { return 0; }
+      try { await processQueuedAttachmentJob(String(row.id), { publishAiQueue, allowInFlight: resetCurrentInFlight }); return 1; } catch (error) { console.warn(`[Attachment] inline job ${String(row.id)} failed: ${error instanceof Error ? error.message : String(error)}`); return 0; }
     }));
     processed += results.reduce<number>((sum, value) => sum + value, 0);
   }
@@ -103,18 +104,20 @@ export async function processPendingAttachmentJobsInline(limit = 40, publishAiQu
 }
 
 /** Runs in an isolated Queue consumer invocation for exactly one attachment. */
-export async function processQueuedAttachmentJob(jobId: string, options: { publishAiQueue?: boolean } = {}) {
+export async function processQueuedAttachmentJob(jobId: string, options: { publishAiQueue?: boolean; allowInFlight?: boolean } = {}) {
   const admin = createSupabaseAdminClient();
   const { data: job, error } = await admin.from("processing_jobs").select("*, attachments(*)").eq("id", jobId).maybeSingle();
   if (error) throw error;
   if (!job) return { skipped: true, reason: "작업을 찾을 수 없습니다." };
-  if (job.status === "완료" || job.status === "보류" || job.status === "처리 중") return { skipped: true, reason: "이미 처리된 작업입니다." };
+  if (job.status === "완료" || job.status === "보류") return { skipped: true, reason: "이미 처리된 작업입니다." };
   const attachment = job.attachments as Row | undefined;
   if (!attachment) throw new Error("첨부파일 정보를 찾을 수 없습니다.");
 
-  const { data: claimed, error: claimError } = await admin.from("processing_jobs").update({ status: "처리 중", attempts: Number(job.attempts) + 1, updated_at: new Date().toISOString() }).eq("id", jobId).in("status", ["대기", "실패"]).select("id").maybeSingle();
-  if (claimError) throw claimError;
-  if (!claimed) return { skipped: true, reason: "다른 작업자가 이미 처리 중입니다." };
+  if (job.status !== "처리 중" || !options.allowInFlight) {
+    const { data: claimed, error: claimError } = await admin.from("processing_jobs").update({ status: "처리 중", attempts: Number(job.attempts) + 1, updated_at: new Date().toISOString() }).eq("id", jobId).in("status", ["대기", "실패"]).select("id").maybeSingle();
+    if (claimError) throw claimError;
+    if (!claimed) return { skipped: true, reason: "다른 작업자가 이미 처리 중입니다." };
+  }
   const processed = await processAttachment(String(attachment.notice_id), {
     id: String(attachment.id), name: String(attachment.name), kind: String(attachment.kind),
     status: String(attachment.status) as Attachment["status"], sourceUrl: String(attachment.source_url ?? ""),
