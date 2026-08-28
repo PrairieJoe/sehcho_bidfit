@@ -70,9 +70,11 @@ export class PublicRepository {
         return score.topic_id === topic.id && typeof analysis?.aiModel === "string" && samePublishedBatch && (!window.after || String(score.updated_at ?? "") >= window.after) && (!window.before || String(score.updated_at ?? "") < window.before);
       });
       const notice = noticeOf({ ...row, topic_scores: scores }, undefined, Boolean(window.before && window.hasCompleted));
-      const publishedAt = String(row.published_at ?? "");
-      const inUnitWindow = !window.windowStart || !window.windowEnd || (Boolean(publishedAt) && new Date(publishedAt).getTime() >= new Date(window.windowStart).getTime() && new Date(publishedAt).getTime() <= new Date(window.windowEnd).getTime());
-      return inUnitWindow ? notice : undefined;
+      // The score's completed batch is the authoritative membership marker
+      // for the analysis unit. Re-parsing the source's publication timestamp
+      // here dropped otherwise valid current-batch notices when Nara returned
+      // a missing or non-standard date format.
+      return notice;
     }).filter((notice): notice is BidNotice => Boolean(window.hasCompleted && notice?.analysis));
   }
   async getNotice(id: string) { return (await this.listNotices()).find((notice) => notice.id === id); }
