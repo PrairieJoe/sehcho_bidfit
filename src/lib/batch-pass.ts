@@ -114,8 +114,11 @@ export async function runGithubActionsBatch() {
       countCurrentJobs(admin, "processing_jobs", collection.noticeIds, ["실패"], true),
       countCurrentJobs(admin, "notice_ai_jobs", collection.noticeIds, ["실패"]),
     ]);
-    const complete = (remainingAttachments ?? 0) === 0 && (remainingAi ?? 0) === 0 && (failedAttachments ?? 0) === 0 && (failedAi ?? 0) === 0;
-    const errorSummary = complete ? null : `처리 미완료: 대기 첨부 ${remainingAttachments}건·대기 AI ${remainingAi}건·실패 첨부 ${failedAttachments}건·실패 AI ${failedAi}건`;
+    // Failed/unsupported documents are terminal and must not hide scores that
+    // were successfully produced for the same analysis window. Only work that
+    // is still pending prevents the public snapshot from being published.
+    const complete = (remainingAttachments ?? 0) === 0 && (remainingAi ?? 0) === 0;
+    const errorSummary = complete && !(failedAttachments || failedAi) ? null : `일부 처리 제외: 실패 첨부 ${failedAttachments}건·실패 AI ${failedAi}건`;
     await admin.from("batch_runs").update({ status: complete ? "완료" : "부분 완료", completed_at: new Date().toISOString(), discovered: collection.discovered, changed: collection.changed, analyzed, api_calls: collection.queryCount, window_start: collection.windowStart, window_end: collection.windowEnd, window_hours: collection.windowHours, error_summary: errorSummary }).eq("id", started.id);
     return { ...collection, attachmentProcessed, aiProcessed, analyzed, complete };
   } catch (error) {
