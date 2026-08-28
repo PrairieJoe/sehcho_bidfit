@@ -35,13 +35,14 @@ jobs:
       - name: Run collection and analysis with transient retry
         run: |
           last_status=1
-          for attempt in 1 2 3; do
-            echo "[workflow] batch attempt ${attempt}/3"
+          for attempt in 1 2 3 4 5; do
+            echo "[workflow] batch attempt ${attempt}/5"
             pnpm batch:daily && exit 0
             last_status=$?
-            if [ "$attempt" -lt 3 ]; then
-              echo "[workflow] batch failed; retrying after 20 seconds"
-              sleep 20
+            if [ "$attempt" -lt 5 ]; then
+              delay=$((attempt * 30))
+              echo "[workflow] batch failed; retrying after ${delay} seconds"
+              sleep "$delay"
             fi
           done
           exit "$last_status"
