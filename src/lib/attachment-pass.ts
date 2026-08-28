@@ -96,7 +96,7 @@ export async function processPendingAttachmentJobsInline(limit = 40, publishAiQu
   for (let index = 0; index < (data ?? []).length; index += 8) {
     const group = (data ?? []).slice(index, index + 8);
     const results = await Promise.all(group.map(async (row) => {
-      try { await processQueuedAttachmentJob(String(row.id), { publishAiQueue, allowInFlight: resetCurrentInFlight }); return 1; } catch (error) { console.warn(`[Attachment] inline job ${String(row.id)} failed: ${error instanceof Error ? error.message : String(error)}`); return 0; }
+      try { await processQueuedAttachmentJob(String(row.id), { publishAiQueue, allowInFlight: resetCurrentInFlight }); return 1; } catch (error) { const detail = error instanceof Error ? error.message : JSON.stringify(error); console.warn(`[Attachment] inline job ${String(row.id)} failed: ${detail}`); return 0; }
     }));
     processed += results.reduce<number>((sum, value) => sum + value, 0);
   }
@@ -110,7 +110,7 @@ export async function processQueuedAttachmentJob(jobId: string, options: { publi
   if (error) throw error;
   if (!job) return { skipped: true, reason: "작업을 찾을 수 없습니다." };
   if (job.status === "완료" || job.status === "보류") return { skipped: true, reason: "이미 처리된 작업입니다." };
-  const attachment = job.attachments as Row | undefined;
+  const attachment = (Array.isArray(job.attachments) ? job.attachments[0] : job.attachments) as Row | undefined;
   if (!attachment) throw new Error("첨부파일 정보를 찾을 수 없습니다.");
 
   if (job.status !== "처리 중" || !options.allowInFlight) {
