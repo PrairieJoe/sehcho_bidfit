@@ -1,5 +1,6 @@
 import type { Attachment, BidNotice, BidSource, BusinessType, NoticeStatus } from "@/lib/types";
 import { runtimeEnv } from "@/lib/runtime-env";
+import https from "node:https";
 
 const BASE_URL = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService";
 // BidFit's product scope is service procurements only. Do not mix goods,
@@ -30,9 +31,25 @@ async function fetchApiPage(url: URL, businessType: string) {
   // and a transient transport failure must not create a false partial batch.
   for (let attempt = 1; attempt <= 5; attempt += 1) {
     try {
-      const response = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(30_000) });
-      if (!response.ok) throw new Error(`나라장터 ${businessType} 목록 조회 실패 (${response.status})`);
-      return await response.json() as { response?: { header?: { resultCode?: string | number; resultMsg?: string }; body?: { items?: { item?: Record<string, unknown> | Record<string, unknown>[] } | Record<string, unknown>[]; totalCount?: number } } };
+      // GitHub-hosted runners intermittently fail during undici's address
+      // selection for apis.data.go.kr. Force IPv4 through Node's native HTTPS
+      // client before falling back to fetch, which otherwise can time out even
+      // when the runner's curl IPv4 probe succeeds.
+      const payload = await new Promise<unknown>((resolve, reject) => {
+        const request = https.get(url, { family: 4, headers: { Accept: "application/json" } }, (response) => {
+          let body = "";
+          response.setEncoding("utf8");
+          response.on("data", (chunk) => { body += chunk; });
+          response.on("end", () => {
+            const status = response.statusCode ?? 0;
+            if (status < 200 || status >= 300) { reject(new Error(`나라장터 ${businessType} 목록 조회 실패 (${status})`)); return; }
+            try { resolve(JSON.parse(body)); } catch { reject(new Error(`나라장터 ${businessType} JSON 응답 파싱 실패`)); }
+          });
+        });
+        request.setTimeout(45_000, () => request.destroy(new Error("나라장터 HTTPS 응답 시간 초과")));
+        request.on("error", reject);
+      });
+      return payload as { response?: { header?: { resultCode?: string | number; resultMsg?: string }; body?: { items?: { item?: Record<string, unknown> | Record<string, unknown>[] } | Record<string, unknown>[]; totalCount?: number } } };
     } catch (error) {
       lastError = error;
       const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
