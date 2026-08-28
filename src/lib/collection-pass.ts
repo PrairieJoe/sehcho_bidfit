@@ -19,23 +19,11 @@ async function retryQuery<T>(operation: () => Promise<{ data: T | null; error: {
 export async function runCollectionPass(runStartedAt = new Date()) {
   const windowEnd = runStartedAt;
   const source = getBidSource();
-  const longWindowStart = new Date(windowEnd.getTime() - 72 * 3_600_000);
   const configuredLimit = Number(process.env.GEMINI_DAILY_NOTICE_LIMIT ?? 100);
-  let longWindowCount: number;
-  if (source.countNotices) {
-    try {
-      longWindowCount = await source.countNotices(longWindowStart, windowEnd);
-    } catch (error) {
-      // A count-only request is an optimization, not a reason to lose the
-      // daily snapshot. If data.go.kr drops that request, continue in the
-      // quota-safe 24-hour mode and let the actual bounded query decide.
-      console.warn(`[Nara] 72시간 건수 조회 실패, 24시간 모드로 전환: ${error instanceof Error ? error.message : "알 수 없는 오류"}`);
-      longWindowCount = Number.POSITIVE_INFINITY;
-    }
-  } else {
-    longWindowCount = (await source.listNotices(longWindowStart, windowEnd)).length;
-  }
-  const selectedWindow = chooseAnalysisWindow(longWindowCount, windowEnd, configuredLimit);
+  // The daily unit is always 24 hours, so a separate 72-hour count request is
+  // both unnecessary and harmful for Nara's intermittently slow API. It also
+  // used to make one execution perform an avoidable extra HTTPS request.
+  const selectedWindow = chooseAnalysisWindow(0, windowEnd, configuredLimit);
   const { windowStart, windowHours, useShortWindow } = selectedWindow;
   const notices = await source.listNotices(windowStart, windowEnd);
   // A missing/invalid deadline is a data-quality issue, not a reason to drop
