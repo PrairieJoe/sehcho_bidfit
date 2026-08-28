@@ -4,6 +4,18 @@ import { enqueueReadyNoticeAiJobs, processPendingNoticeAiJobsInline } from "@/li
 import { ensureDefaultTopic } from "@/lib/repository";
 import { createSupabaseAdminClient } from "@/lib/supabase";
 
+async function countCurrentJobs(admin: any, table: string, noticeIds: string[], statuses: string[], attachmentRelation = false) {
+  let total = 0;
+  for (let index = 0; index < noticeIds.length; index += 100) {
+    const select = attachmentRelation ? "id,attachments!inner(notice_id)" : "id";
+    const column = attachmentRelation ? "attachments.notice_id" : "notice_id";
+    const { count, error } = await admin.from(table).select(select, { count: "exact", head: true }).in(column, noticeIds.slice(index, index + 100)).in("status", statuses);
+    if (error) throw error;
+    total += count ?? 0;
+  }
+  return total;
+}
+
 /** Runs the daily unit of work and records the outcome shown on the dashboard. */
 export async function runDailyBatch() {
   const admin = createSupabaseAdminClient();
@@ -64,24 +76,26 @@ export async function runGithubActionsBatch() {
     let aiProcessed = 0;
     for (let cycle = 0; cycle < 1_000; cycle += 1) {
       console.log(`[Batch] cycle=${cycle + 1} attachmentProcessed=${attachmentProcessed} aiProcessed=${aiProcessed}`);
-      attachmentProcessed += await processPendingAttachmentJobsInline(40, false, String(started.started_at));
-      aiProcessed += await processPendingNoticeAiJobsInline(4, String(started.started_at));
-      const [{ count: pendingAttachments }, { count: pendingAi }] = await Promise.all([
-        admin.from("processing_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]).gte("created_at", String(started.started_at)),
-        admin.from("notice_ai_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]).gte("created_at", String(started.started_at)),
+      attachmentProcessed += await processPendingAttachmentJobsInline(40, false, undefined, collection.noticeIds);
+      aiProcessed += await processPendingNoticeAiJobsInline(4, undefined, collection.noticeIds);
+      const [pendingAttachments, pendingAi] = await Promise.all([
+        countCurrentJobs(admin, "processing_jobs", collection.noticeIds, ["대기", "처리 중"], true),
+        countCurrentJobs(admin, "notice_ai_jobs", collection.noticeIds, ["대기", "처리 중"]),
       ]);
       console.log(`[Batch] pending attachments=${pendingAttachments ?? 0} ai=${pendingAi ?? 0}`);
-      if ((pendingAttachments ?? 0) === 0 && (pendingAi ?? 0) === 0) break;
+      if (pendingAttachments === 0 && pendingAi === 0) break;
       if (attachmentProcessed === 0 && aiProcessed === 0) await new Promise((resolve) => setTimeout(resolve, 2_000));
     }
     await finishActiveBatchIfDrained();
     const { count: analyzed } = await admin.from("topic_scores").select("id", { count: "exact", head: true }).gte("updated_at", String(started.started_at));
-    const { count: remainingAttachments } = await admin.from("processing_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]).gte("created_at", String(started.started_at));
-    const { count: remainingAi } = await admin.from("notice_ai_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]).gte("created_at", String(started.started_at));
-    const { count: failedAttachments } = await admin.from("processing_jobs").select("id", { count: "exact", head: true }).eq("status", "실패").gte("created_at", String(started.started_at));
-    const { count: failedAi } = await admin.from("notice_ai_jobs").select("id", { count: "exact", head: true }).eq("status", "실패").gte("created_at", String(started.started_at));
+    const [remainingAttachments, remainingAi, failedAttachments, failedAi] = await Promise.all([
+      countCurrentJobs(admin, "processing_jobs", collection.noticeIds, ["대기", "처리 중"], true),
+      countCurrentJobs(admin, "notice_ai_jobs", collection.noticeIds, ["대기", "처리 중"]),
+      countCurrentJobs(admin, "processing_jobs", collection.noticeIds, ["실패"], true),
+      countCurrentJobs(admin, "notice_ai_jobs", collection.noticeIds, ["실패"]),
+    ]);
     const complete = (remainingAttachments ?? 0) === 0 && (remainingAi ?? 0) === 0 && (failedAttachments ?? 0) === 0 && (failedAi ?? 0) === 0;
-    const errorSummary = complete ? null : `처리 미완료: 대기 첨부 ${remainingAttachments ?? 0}건·대기 AI ${remainingAi ?? 0}건·실패 첨부 ${failedAttachments ?? 0}건·실패 AI ${failedAi ?? 0}건`;
+    const errorSummary = complete ? null : `처리 미완료: 대기 첨부 ${remainingAttachments}건·대기 AI ${remainingAi}건·실패 첨부 ${failedAttachments}건·실패 AI ${failedAi}건`;
     await admin.from("batch_runs").update({ status: complete ? "완료" : "부분 완료", completed_at: new Date().toISOString(), discovered: collection.discovered, changed: collection.changed, analyzed: analyzed ?? 0, api_calls: collection.queryCount, window_start: collection.windowStart, window_end: collection.windowEnd, window_hours: collection.windowHours, error_summary: errorSummary }).eq("id", started.id);
     return { ...collection, attachmentProcessed, aiProcessed, analyzed: analyzed ?? 0, complete };
   } catch (error) {

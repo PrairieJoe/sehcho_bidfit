@@ -154,12 +154,22 @@ export async function processNoticeAiJob(aiJobId: string, batchId?: string) {
 }
 
 /** Safety-net worker for hosts where Vercel Queue delivery is delayed. */
-export async function processPendingNoticeAiJobsInline(limit = 32, createdSince?: string) {
+export async function processPendingNoticeAiJobsInline(limit = 32, createdSince?: string, noticeIds?: string[]) {
   const admin = createSupabaseAdminClient();
-  let query = admin.from("notice_ai_jobs").select("id").eq("status", "대기").order("created_at", { ascending: true }).limit(limit);
-  if (createdSince) query = query.gte("created_at", createdSince);
-  const { data, error } = await query;
-  if (error) throw error;
+  let data: Row[] = [];
+  if (noticeIds?.length) {
+    for (let index = 0; index < noticeIds.length && data.length < limit; index += 100) {
+      const { data: part, error } = await admin.from("notice_ai_jobs").select("id").eq("status", "대기").in("notice_id", noticeIds.slice(index, index + 100)).order("created_at", { ascending: true }).limit(limit - data.length);
+      if (error) throw error;
+      data.push(...(part ?? []));
+    }
+  } else {
+    let query = admin.from("notice_ai_jobs").select("id").eq("status", "대기").order("created_at", { ascending: true }).limit(limit);
+    if (createdSince) query = query.gte("created_at", createdSince);
+    const result = await query;
+    data = result.data ?? [];
+    if (result.error) throw result.error;
+  }
   const { data: activeBatch } = await admin.from("batch_runs").select("id").in("status", ["실행 중", "분석 중"]).order("started_at", { ascending: false }).limit(1).maybeSingle();
   let processed = 0;
   for (let index = 0; index < (data ?? []).length; index += 4) {
