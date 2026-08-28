@@ -24,6 +24,7 @@ jobs:
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.5-flash-lite' }}
       GEMINI_DAILY_NOTICE_LIMIT: ${{ vars.GEMINI_DAILY_NOTICE_LIMIT || '100' }}
+      NODE_OPTIONS: --dns-result-order=ipv4first
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
