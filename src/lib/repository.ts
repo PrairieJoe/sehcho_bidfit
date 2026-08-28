@@ -19,19 +19,16 @@ const noticeOf = (row: Row, state?: Row, allowLegacyAnalysis = false): BidNotice
   // snapshot when its score was written before that run. The notice metadata
   // may already have been refreshed, so requiring the new source hash here
   // would incorrectly erase the previous public result.
-  const attachmentsReady = attachments.length === 0 || attachments.every((item) => item.status === "분석 완료");
   // A score from the last published batch is an immutable public snapshot.
   // The next collection may reset or add attachment rows while it is still
   // working; that must not erase the prior result from the user's screen.
-  // A quota fallback is deliberately based on the notice title/description,
-  // rather than attachment text. It remains a valid, clearly low-confidence
-  // score while attachment extraction is pending, so every collected service
-  // notice stays visible in the published 24-hour analysis unit.
-  const isQuotaFallback = (candidate as Row | undefined)?.aiModel === "rule-based-quota-fallback";
-  // For a current (non-snapshot) score, keep the source-hash gate. Attachment
-  // readiness is required for Gemini evidence, but not for the transparent
-  // notice-text fallback described above.
-  const analysis = candidate && (allowLegacyAnalysis || (candidateHash === String(row.source_hash ?? "") && (attachmentsReady || isQuotaFallback))) ? candidate : undefined;
+  // A current score is publishable when it matches the current notice source
+  // fingerprint. Gemini rows are created only after their attachment-readiness
+  // gate; a matching carried-forward Gemini result remains valid even if a
+  // later collection has queued the same attachment again. Quota fallbacks are
+  // likewise title/description based and intentionally available before text
+  // extraction. Requiring today's attachment state here hid valid scores.
+  const analysis = candidate && (allowLegacyAnalysis || candidateHash === String(row.source_hash ?? "")) ? candidate : undefined;
   return { id: String(row.id), bidNumber: String(row.bid_number), order: String(row.bid_order), title: String(row.title), businessType: String(row.business_type) as BidNotice["businessType"], status: String(row.status) as BidNotice["status"], agency: String(row.agency), demandAgency: String(row.demand_agency), region: String(row.region), publishedAt: String(row.published_at ?? ""), closesAt: String(row.closes_at ?? ""), budget: row.budget === null ? null : Number(row.budget), budgetLabel: String(row.budget_label), contractMethod: String(row.contract_method), detailUrl: String(row.detail_url), description: String(row.description), tasks: array(row.tasks), qualifications: array(row.qualifications), changeSummary: String(row.change_summary ?? "") || undefined, attachments, analysis, reviewState: state?.review_state as BidNotice["reviewState"] ?? "검토 전", memo: String(state?.memo ?? "") || undefined };
 };
 const runOf = (row: Row): BatchRun => ({ id: String(row.id), startedAt: String(row.started_at), completedAt: row.completed_at ? String(row.completed_at) : undefined, status: String(row.status) as BatchRun["status"], discovered: Number(row.discovered), changed: Number(row.changed), analyzed: Number(row.analyzed), notified: Number(row.notified), apiCalls: Number(row.api_calls), windowStart: String(row.window_start ?? "") || undefined, windowEnd: String(row.window_end ?? "") || undefined, windowHours: row.window_hours == null ? undefined : Number(row.window_hours), errorSummary: String(row.error_summary ?? "") || undefined });
