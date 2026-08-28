@@ -33,11 +33,15 @@ async function recoverPendingAttachmentsWithTerminalJobs() {
     return status === "대기" || (name.endsWith(".hwp") && reason.includes("구형 HWP 텍스트 추출 HTTP 401"));
   }).map((job: Row) => String(job.id));
   if (!ids.length) return 0;
-  const { error: updateError } = await admin
-    .from("processing_jobs")
-    .update({ status: "대기", failure_reason: null, updated_at: new Date().toISOString() })
-    .in("id", ids);
-  if (updateError) throw updateError;
+  // Supabase REST encodes `.in()` values in the request URL. Updating a large
+  // legacy recovery set in one call can exceed undici's 16KB header limit.
+  for (let index = 0; index < ids.length; index += 100) {
+    const { error: updateError } = await admin
+      .from("processing_jobs")
+      .update({ status: "대기", failure_reason: null, updated_at: new Date().toISOString() })
+      .in("id", ids.slice(index, index + 100));
+    if (updateError) throw updateError;
+  }
   return ids.length;
 }
 
