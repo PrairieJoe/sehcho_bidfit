@@ -81,15 +81,17 @@ export async function runGithubActionsBatch() {
     let aiProcessed = 0;
     for (let cycle = 0; cycle < 1_000; cycle += 1) {
       console.log(`[Batch] cycle=${cycle + 1} attachmentProcessed=${attachmentProcessed} aiProcessed=${aiProcessed}`);
-      attachmentProcessed += await processPendingAttachmentJobsInline(40, false, undefined, collection.noticeIds);
-      aiProcessed += await processPendingNoticeAiJobsInline(4, undefined, collection.noticeIds, false, String(started.id));
+      const cycleAttachmentProcessed = await processPendingAttachmentJobsInline(40, false, undefined, collection.noticeIds);
+      const cycleAiProcessed = await processPendingNoticeAiJobsInline(4, undefined, collection.noticeIds, false, String(started.id));
+      attachmentProcessed += cycleAttachmentProcessed;
+      aiProcessed += cycleAiProcessed;
       const [pendingAttachments, pendingAi] = await Promise.all([
         countCurrentJobs(admin, "processing_jobs", collection.noticeIds, ["대기", "처리 중"], true),
         countCurrentJobs(admin, "notice_ai_jobs", collection.noticeIds, ["대기", "처리 중"]),
       ]);
       console.log(`[Batch] pending attachments=${pendingAttachments ?? 0} ai=${pendingAi ?? 0}`);
       if (pendingAttachments === 0 && pendingAi === 0) break;
-      if (attachmentProcessed === 0 && aiProcessed === 0) await new Promise((resolve) => setTimeout(resolve, 2_000));
+      if (cycleAttachmentProcessed === 0 && cycleAiProcessed === 0) await new Promise((resolve) => setTimeout(resolve, 2_000));
     }
     await finishActiveBatchIfDrained();
     const { data: analyzedRows, error: analyzedError } = await admin.from("topic_scores").select("id,analysis").gte("updated_at", String(started.started_at));
