@@ -34,6 +34,18 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Diagnose Nara API connectivity
+        run: |
+          echo "[nara-preflight] DNS records"
+          getent ahosts apis.data.go.kr || true
+          echo "[nara-preflight] IPv4 HTTPS probe (HTTP 401/403 still proves transport)"
+          curl --ipv4 --silent --show-error --connect-timeout 15 --max-time 30 \
+            --output /dev/null --write-out '[nara-preflight] ipv4 http=%{http_code} remote=%{remote_ip}\n' \
+            'https://apis.data.go.kr/1230000/ad/BidPublicInfoService' || true
+          echo "[nara-preflight] IPv6 HTTPS probe (no route is non-fatal)"
+          curl --ipv6 --silent --show-error --connect-timeout 15 --max-time 30 \
+            --output /dev/null --write-out '[nara-preflight] ipv6 http=%{http_code} remote=%{remote_ip}\n' \
+            'https://apis.data.go.kr/1230000/ad/BidPublicInfoService' || true
       - name: Run collection and analysis with transient retry
         run: |
           last_status=1

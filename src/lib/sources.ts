@@ -35,6 +35,8 @@ async function fetchApiPage(url: URL, businessType: string) {
       return await response.json() as { response?: { header?: { resultCode?: string | number; resultMsg?: string }; body?: { items?: { item?: Record<string, unknown> | Record<string, unknown>[] } | Record<string, unknown>[]; totalCount?: number } } };
     } catch (error) {
       lastError = error;
+      const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      console.warn(`[Nara] ${businessType} API transport attempt ${attempt}/5 failed: ${detail}`);
       if (attempt < 5) await new Promise((resolve) => setTimeout(resolve, 2 ** attempt * 1_000));
     }
   }
