@@ -63,6 +63,18 @@ export async function enqueuePendingAttachmentJobs(limit = 200) {
 /** Safety net for deployments where the hosted queue consumer is delayed. */
 export async function processPendingAttachmentJobsInline(limit = 40, publishAiQueue = true, createdSince?: string, noticeIds?: string[]) {
   const admin = createSupabaseAdminClient();
+  if (noticeIds?.length) {
+    const staleBefore = new Date(Date.now() - 60_000).toISOString();
+    for (let index = 0; index < noticeIds.length; index += 100) {
+      const { data: stale, error } = await admin.from("processing_jobs").select("id,attachments!inner(notice_id)").eq("status", "처리 중").lt("updated_at", staleBefore).in("attachments.notice_id", noticeIds.slice(index, index + 100));
+      if (error) throw error;
+      const ids = (stale ?? []).map((row: Row) => String(row.id));
+      if (ids.length) {
+        const { error: updateError } = await admin.from("processing_jobs").update({ status: "대기", updated_at: new Date().toISOString() }).in("id", ids);
+        if (updateError) throw updateError;
+      }
+    }
+  }
   let data: Row[] = [];
   if (noticeIds?.length) {
     for (let index = 0; index < noticeIds.length && data.length < limit; index += 100) {
