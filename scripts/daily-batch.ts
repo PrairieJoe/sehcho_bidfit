@@ -17,10 +17,15 @@ async function alreadyCompletedToday() {
 }
 
 async function main() {
-  const completed = await alreadyCompletedToday();
-  if (completed) {
-    console.log(`[workflow] 오늘 이미 완료된 배치가 있어 재시도를 건너뜁니다: ${completed.started_at}`);
-    return;
+  const force = String(process.env.FORCE_DAILY_BATCH ?? "false").toLowerCase() === "true";
+  if (!force) {
+    const completed = await alreadyCompletedToday();
+    if (completed) {
+      console.log(`[workflow] 오늘 이미 완료된 배치가 있어 재시도를 건너뜁니다: ${completed.started_at}`);
+      return;
+    }
+  } else {
+    console.log("[workflow] force=true: 오늘 완료 배치 중복 가드를 우회하고 실제 수집·분석을 실행합니다.");
   }
   const result = await runGithubActionsBatch();
   console.log(JSON.stringify({

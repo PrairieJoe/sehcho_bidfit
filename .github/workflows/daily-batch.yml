@@ -6,6 +6,12 @@ on:
     - cron: "35 23 * * *" # 08:35 KST retry slot
     - cron: "55 23 * * *" # 08:55 KST retry slot
   workflow_dispatch:
+    inputs:
+      force:
+        description: "오늘 완료 배치가 있어도 실제 수집·분석을 다시 실행"
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: bidfit-daily-batch
@@ -25,6 +31,7 @@ jobs:
       GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.5-flash-lite' }}
       GEMINI_DAILY_NOTICE_LIMIT: ${{ vars.GEMINI_DAILY_NOTICE_LIMIT || '100' }}
       NODE_OPTIONS: --dns-result-order=ipv4first
+      FORCE_DAILY_BATCH: ${{ inputs.force || 'false' }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
