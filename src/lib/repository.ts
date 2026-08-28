@@ -58,7 +58,12 @@ export class PublicRepository {
     // The public product scope is service procurements only. Keep this filter
     // at the repository boundary as well as in the source adapter so legacy
     // goods/construction rows can never leak into the public result.
-    const { data, error } = await this.admin.from("notices").select("*, attachments(*), topic_scores!left(analysis, topic_id, updated_at)").eq("business_type", "용역").order("closes_at");
+    let noticeQuery = this.admin.from("notices").select("*, attachments(*), topic_scores!inner(analysis, topic_id, updated_at)").eq("business_type", "용역").eq("topic_scores.topic_id", topic.id).order("closes_at");
+    // Scope the expensive joined read to the latest published batch. The
+    // previous left join loaded every historical notice and every topic score,
+    // then filtered in memory, which made a 495-notice snapshot time out.
+    if (window.after) noticeQuery = noticeQuery.gte("topic_scores.updated_at", window.after);
+    const { data, error } = await noticeQuery;
     if (error) throw error;
     return (data ?? []).map((row: Row) => {
       // A collection pass updates notice.updated_at before analysis finishes.
