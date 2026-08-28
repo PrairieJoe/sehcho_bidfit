@@ -20,10 +20,11 @@ export async function runCollectionPass(runStartedAt = new Date()) {
   const windowEnd = runStartedAt;
   const source = getBidSource();
   const longWindowStart = new Date(windowEnd.getTime() - 72 * 3_600_000);
-  const longWindowNotices = await source.listNotices(longWindowStart, windowEnd);
-  const selectedWindow = chooseAnalysisWindow(longWindowNotices.length, windowEnd, Number(process.env.GEMINI_DAILY_NOTICE_LIMIT ?? 100));
+  const configuredLimit = Number(process.env.GEMINI_DAILY_NOTICE_LIMIT ?? 100);
+  const longWindowCount = source.countNotices ? await source.countNotices(longWindowStart, windowEnd) : (await source.listNotices(longWindowStart, windowEnd)).length;
+  const selectedWindow = chooseAnalysisWindow(longWindowCount, windowEnd, configuredLimit);
   const { windowStart, windowHours, useShortWindow } = selectedWindow;
-  const notices = useShortWindow ? await source.listNotices(windowStart, windowEnd) : longWindowNotices;
+  const notices = await source.listNotices(windowStart, windowEnd);
   // A missing/invalid deadline is a data-quality issue, not a reason to drop
   // the notice. Keep the notice in the daily snapshot so the user can see it
   // and the detail page can show “확인 필요” instead of silently losing it.
