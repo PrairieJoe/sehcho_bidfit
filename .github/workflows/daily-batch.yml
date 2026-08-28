@@ -2,7 +2,9 @@ name: BidFit daily collection and analysis
 
 on:
   schedule:
-    - cron: "15 23 * * *" # 08:15 KST (UTC+9); within the 08:00-09:00 window
+    - cron: "15 23 * * *" # 08:15 KST (UTC+9)
+    - cron: "35 23 * * *" # 08:35 KST retry slot
+    - cron: "55 23 * * *" # 08:55 KST retry slot
   workflow_dispatch:
 
 concurrency:
