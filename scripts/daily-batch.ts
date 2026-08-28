@@ -36,7 +36,10 @@ async function main() {
     complete: result.complete,
     diagnostics: result.diagnostics,
   }, null, 2));
-  if (!result.complete) process.exitCode = 2;
+  // A terminal partial batch is reported in Supabase and the dashboard; do
+  // not rerun it five times in one workflow merely because a scan or an
+  // unsupported attachment cannot become Gemini input.
+  if (!result.drained) process.exitCode = 2;
 }
 
 main().catch((error) => {

@@ -202,15 +202,17 @@ export async function runGithubActionsBatch() {
       countCurrentJobs(admin, "processing_jobs", collection.noticeIds, ["실패"], true),
       countCurrentJobs(admin, "notice_ai_jobs", collection.noticeIds, ["실패"]),
     ]);
-    // Failed/unsupported documents are terminal and must not hide scores that
-    // were successfully produced for the same analysis window. Only work that
-    // is still pending prevents the public snapshot from being published.
-    const complete = (remainingAttachments ?? 0) === 0 && (remainingAi ?? 0) === 0;
-    const errorSummary = complete && !(failedAttachments || failedAi) ? null : `일부 처리 제외: 실패 첨부 ${failedAttachments}건·실패 AI ${failedAi}건`;
-    await admin.from("batch_runs").update({ status: complete ? "완료" : "부분 완료", completed_at: new Date().toISOString(), discovered: collection.discovered, changed: collection.changed, analyzed, api_calls: collection.queryCount, window_start: collection.windowStart, window_end: collection.windowEnd, window_hours: collection.windowHours, error_summary: errorSummary }).eq("id", started.id);
+    // A drained queue is not the same as a completed analysis. Unsupported or
+    // unextractable attachments are terminal, but the batch must remain
+    // explicitly partial until every collected notice has a Gemini result.
+    const drained = (remainingAttachments ?? 0) === 0 && (remainingAi ?? 0) === 0;
     const diagnostics = await currentBatchDiagnostics(admin, collection.noticeIds, String(started.id), String(started.started_at));
+    const geminiAnalyzed = diagnostics.geminiAttachment + diagnostics.geminiTitleOnly;
+    const complete = drained && !(failedAttachments || failedAi) && geminiAnalyzed === collection.discovered;
+    const errorSummary = complete ? null : `Gemini 분석 ${geminiAnalyzed}/${collection.discovered}건; 미완료 첨부 공고 ${diagnostics.attachmentNotReady}건·첨부 준비 후 Gemini 미실행 ${diagnostics.attachmentReadyWithoutGemini}건·첨부 없음 Gemini 미실행 ${diagnostics.noAttachmentWithoutGemini}건·실패 첨부 ${failedAttachments}건·실패 AI ${failedAi}건`;
+    await admin.from("batch_runs").update({ status: complete ? "완료" : "부분 완료", completed_at: new Date().toISOString(), discovered: collection.discovered, changed: collection.changed, analyzed, api_calls: collection.queryCount, window_start: collection.windowStart, window_end: collection.windowEnd, window_hours: collection.windowHours, error_summary: errorSummary }).eq("id", started.id);
     console.log(`[Batch] diagnostics ${JSON.stringify(diagnostics)}`);
-    return { ...collection, attachmentProcessed, aiProcessed, carriedScores, analyzed, complete, diagnostics };
+    return { ...collection, attachmentProcessed, aiProcessed, carriedScores, analyzed, complete, drained, diagnostics };
   } catch (error) {
     await admin.from("batch_runs").update({ status: "부분 완료", completed_at: new Date().toISOString(), error_summary: error instanceof Error ? error.message : "작업자 실행 실패" }).eq("id", started.id);
     throw error;
