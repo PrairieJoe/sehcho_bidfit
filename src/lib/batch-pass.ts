@@ -16,6 +16,36 @@ async function countCurrentJobs(admin: any, table: string, noticeIds: string[], 
   return total;
 }
 
+/**
+ * A force/recovery run can collect the exact same notice after its attachment
+ * text was intentionally purged following a successful Gemini analysis. Keep
+ * that immutable, source-hash-matched score in the new completed snapshot
+ * instead of publishing an empty dashboard solely because there was no new
+ * attachment work to perform.
+ */
+async function carryForwardUnchangedScores(admin: any, noticeIds: string[], batchId: string) {
+  let carried = 0;
+  for (let index = 0; index < noticeIds.length; index += 100) {
+    const ids = noticeIds.slice(index, index + 100);
+    const [{ data: notices, error: noticesError }, { data: scores, error: scoresError }] = await Promise.all([
+      admin.from("notices").select("id,source_hash").in("id", ids),
+      admin.from("topic_scores").select("id,notice_id,analysis").in("notice_id", ids),
+    ]);
+    if (noticesError) throw noticesError;
+    if (scoresError) throw scoresError;
+    const hashByNotice = new Map((notices ?? []).map((notice: any) => [String(notice.id), String(notice.source_hash ?? "")]));
+    for (const score of scores ?? []) {
+      const analysis = score.analysis as Record<string, unknown> | null;
+      if (!analysis || typeof analysis.aiModel !== "string" || String(analysis.sourceHash ?? "") !== hashByNotice.get(String(score.notice_id))) continue;
+      if (String(analysis.batchId ?? "") === batchId) continue;
+      const { error } = await admin.from("topic_scores").update({ analysis: { ...analysis, batchId }, updated_at: new Date().toISOString() }).eq("id", score.id);
+      if (error) throw error;
+      carried += 1;
+    }
+  }
+  return carried;
+}
+
 /** Runs the daily unit of work and records the outcome shown on the dashboard. */
 export async function runDailyBatch() {
   const admin = createSupabaseAdminClient();
@@ -72,6 +102,7 @@ export async function runGithubActionsBatch() {
     // becomes ready; rescanning every notice on every cycle caused a large
     // Supabase round-trip bottleneck.
     await enqueueReadyNoticeAiJobs({ publish: false, noticeIds: collection.noticeIds });
+    const carriedScores = await carryForwardUnchangedScores(admin, collection.noticeIds, String(started.id));
     // A previous Vercel Queue consumer may still own a job for one of the
     // just-collected notices. The GitHub worker is the authoritative drain for
     // this run, so release those in-flight claims once before processing.
@@ -120,7 +151,7 @@ export async function runGithubActionsBatch() {
     const complete = (remainingAttachments ?? 0) === 0 && (remainingAi ?? 0) === 0;
     const errorSummary = complete && !(failedAttachments || failedAi) ? null : `일부 처리 제외: 실패 첨부 ${failedAttachments}건·실패 AI ${failedAi}건`;
     await admin.from("batch_runs").update({ status: complete ? "완료" : "부분 완료", completed_at: new Date().toISOString(), discovered: collection.discovered, changed: collection.changed, analyzed, api_calls: collection.queryCount, window_start: collection.windowStart, window_end: collection.windowEnd, window_hours: collection.windowHours, error_summary: errorSummary }).eq("id", started.id);
-    return { ...collection, attachmentProcessed, aiProcessed, analyzed, complete };
+    return { ...collection, attachmentProcessed, aiProcessed, carriedScores, analyzed, complete };
   } catch (error) {
     await admin.from("batch_runs").update({ status: "부분 완료", completed_at: new Date().toISOString(), error_summary: error instanceof Error ? error.message : "작업자 실행 실패" }).eq("id", started.id);
     throw error;
