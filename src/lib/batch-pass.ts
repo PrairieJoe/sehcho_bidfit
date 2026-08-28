@@ -79,6 +79,7 @@ export async function runGithubActionsBatch() {
     await processPendingNoticeAiJobsInline(0, undefined, collection.noticeIds, true);
     let attachmentProcessed = 0;
     let aiProcessed = 0;
+    let idleCycles = 0;
     for (let cycle = 0; cycle < 1_000; cycle += 1) {
       console.log(`[Batch] cycle=${cycle + 1} attachmentProcessed=${attachmentProcessed} aiProcessed=${aiProcessed}`);
       const cycleAttachmentProcessed = await processPendingAttachmentJobsInline(40, false, undefined, collection.noticeIds);
@@ -91,7 +92,14 @@ export async function runGithubActionsBatch() {
       ]);
       console.log(`[Batch] pending attachments=${pendingAttachments ?? 0} ai=${pendingAi ?? 0}`);
       if (pendingAttachments === 0 && pendingAi === 0) break;
-      if (cycleAttachmentProcessed === 0 && cycleAiProcessed === 0) await new Promise((resolve) => setTimeout(resolve, 2_000));
+      if (cycleAttachmentProcessed === 0 && cycleAiProcessed === 0) {
+        idleCycles += 1;
+        if (idleCycles >= 5) {
+          console.warn(`[Batch] ${idleCycles}회 연속 진전이 없어 잔여 작업을 미완료로 종료합니다.`);
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 2_000));
+      } else idleCycles = 0;
     }
     await finishActiveBatchIfDrained();
     const { data: analyzedRows, error: analyzedError } = await admin.from("topic_scores").select("id,analysis").gte("updated_at", String(started.started_at));
