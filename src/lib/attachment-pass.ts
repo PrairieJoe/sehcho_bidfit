@@ -122,9 +122,12 @@ export async function processQueuedAttachmentJob(jobId: string, options: { publi
     id: String(attachment.id), name: String(attachment.name), kind: String(attachment.kind),
     status: String(attachment.status) as Attachment["status"], sourceUrl: String(attachment.source_url ?? ""),
   });
-  await admin.from("attachments").update({ status: processed.status, storage_path: null, pages: processed.pages ?? null, sha256: processed.extractedText ? createHash("sha256").update(processed.extractedText, "utf8").digest("hex") : null, failure_reason: processed.failureReason ?? null, updated_at: new Date().toISOString() }).eq("id", attachment.id);
-  if (processed.extractedText) {
-    const { error: textError } = await admin.from("attachment_texts").upsert({ attachment_id: attachment.id, extracted_text: processed.extractedText, page_map: [], extractor_version: "temporary-text-v1" });
+  // HWP extraction can contain NUL bytes. PostgreSQL text rejects them with
+  // 22P05, which otherwise strands the processing job in "처리 중" forever.
+  const extractedText = processed.extractedText?.replace(/\u0000/g, "");
+  await admin.from("attachments").update({ status: processed.status, storage_path: null, pages: processed.pages ?? null, sha256: extractedText ? createHash("sha256").update(extractedText, "utf8").digest("hex") : null, failure_reason: processed.failureReason ?? null, updated_at: new Date().toISOString() }).eq("id", attachment.id);
+  if (extractedText) {
+    const { error: textError } = await admin.from("attachment_texts").upsert({ attachment_id: attachment.id, extracted_text: extractedText, page_map: [], extractor_version: "temporary-text-v1" });
     if (textError) throw textError;
   }
   const terminal = processed.status === "분석 완료" || processed.status === "부분 분석" || processed.status === "보류";
