@@ -34,6 +34,7 @@ async function main() {
     aiProcessed: result.aiProcessed,
     analyzed: result.analyzed,
     complete: result.complete,
+    diagnostics: result.diagnostics,
   }, null, 2));
   if (!result.complete) process.exitCode = 2;
 }

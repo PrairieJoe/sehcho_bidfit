@@ -19,6 +19,44 @@ async function countCurrentJobs(admin: any, table: string, noticeIds: string[], 
 const isGeminiAnalysis = (analysis: Record<string, unknown> | null | undefined) =>
   String(analysis?.aiModel ?? "").toLowerCase().startsWith("gemini");
 
+type BatchDiagnostics = {
+  geminiAttachment: number;
+  geminiTitleOnly: number;
+  attachmentNotReady: number;
+  attachmentReadyWithoutGemini: number;
+  noAttachmentWithoutGemini: number;
+  quotaFailures: number;
+  aiFailureReasons: Record<string, number>;
+};
+
+async function currentBatchDiagnostics(admin: any, noticeIds: string[], batchId: string, startedAt: string): Promise<BatchDiagnostics> {
+  const result: BatchDiagnostics = { geminiAttachment: 0, geminiTitleOnly: 0, attachmentNotReady: 0, attachmentReadyWithoutGemini: 0, noAttachmentWithoutGemini: 0, quotaFailures: 0, aiFailureReasons: {} };
+  for (let index = 0; index < noticeIds.length; index += 100) {
+    const ids = noticeIds.slice(index, index + 100);
+    const { data, error } = await admin.from("notices").select("id,attachments(status),topic_scores(analysis)").in("id", ids);
+    if (error) throw error;
+    for (const notice of data ?? []) {
+      const attachments = Array.isArray(notice.attachments) ? notice.attachments : [];
+      const analyses = Array.isArray(notice.topic_scores) ? notice.topic_scores.map((row: any) => row.analysis as Record<string, unknown> | null) : [];
+      const analyzed = analyses.some((analysis: Record<string, unknown> | null) => isGeminiAnalysis(analysis) && String(analysis?.batchId ?? "") === batchId);
+      if (analyzed) {
+        if (attachments.length) result.geminiAttachment += 1;
+        else result.geminiTitleOnly += 1;
+      } else if (!attachments.length) result.noAttachmentWithoutGemini += 1;
+      else if (attachments.every((attachment: any) => String(attachment.status) === "분석 완료")) result.attachmentReadyWithoutGemini += 1;
+      else result.attachmentNotReady += 1;
+    }
+    const { data: jobs, error: jobsError } = await admin.from("notice_ai_jobs").select("status,failure_reason").in("notice_id", ids).gte("updated_at", startedAt).eq("status", "실패");
+    if (jobsError) throw jobsError;
+    for (const job of jobs ?? []) {
+      const reason = String(job.failure_reason ?? "AI 분석 실패");
+      result.aiFailureReasons[reason] = (result.aiFailureReasons[reason] ?? 0) + 1;
+      if (/quota|429|RESOURCE_EXHAUSTED/i.test(reason)) result.quotaFailures += 1;
+    }
+  }
+  return result;
+}
+
 /**
  * A force/recovery run can collect the exact same notice after its attachment
  * text was intentionally purged following a successful Gemini analysis. Keep
@@ -159,7 +197,9 @@ export async function runGithubActionsBatch() {
     const complete = (remainingAttachments ?? 0) === 0 && (remainingAi ?? 0) === 0;
     const errorSummary = complete && !(failedAttachments || failedAi) ? null : `일부 처리 제외: 실패 첨부 ${failedAttachments}건·실패 AI ${failedAi}건`;
     await admin.from("batch_runs").update({ status: complete ? "완료" : "부분 완료", completed_at: new Date().toISOString(), discovered: collection.discovered, changed: collection.changed, analyzed, api_calls: collection.queryCount, window_start: collection.windowStart, window_end: collection.windowEnd, window_hours: collection.windowHours, error_summary: errorSummary }).eq("id", started.id);
-    return { ...collection, attachmentProcessed, aiProcessed, carriedScores, analyzed, complete };
+    const diagnostics = await currentBatchDiagnostics(admin, collection.noticeIds, String(started.id), String(started.started_at));
+    console.log(`[Batch] diagnostics ${JSON.stringify(diagnostics)}`);
+    return { ...collection, attachmentProcessed, aiProcessed, carriedScores, analyzed, complete, diagnostics };
   } catch (error) {
     await admin.from("batch_runs").update({ status: "부분 완료", completed_at: new Date().toISOString(), error_summary: error instanceof Error ? error.message : "작업자 실행 실패" }).eq("id", started.id);
     throw error;
