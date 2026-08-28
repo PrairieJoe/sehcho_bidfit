@@ -61,9 +61,11 @@ export async function enqueuePendingAttachmentJobs(limit = 200) {
 }
 
 /** Safety net for deployments where the hosted queue consumer is delayed. */
-export async function processPendingAttachmentJobsInline(limit = 40, publishAiQueue = true) {
+export async function processPendingAttachmentJobsInline(limit = 40, publishAiQueue = true, createdSince?: string) {
   const admin = createSupabaseAdminClient();
-  const { data, error } = await admin.from("processing_jobs").select("id").eq("status", "대기").order("created_at", { ascending: true }).limit(limit);
+  let query = admin.from("processing_jobs").select("id").eq("status", "대기").order("created_at", { ascending: true }).limit(limit);
+  if (createdSince) query = query.gte("created_at", createdSince);
+  const { data, error } = await query;
   if (error) throw error;
   let processed = 0;
   for (let index = 0; index < (data ?? []).length; index += 8) {

@@ -154,9 +154,11 @@ export async function processNoticeAiJob(aiJobId: string, batchId?: string) {
 }
 
 /** Safety-net worker for hosts where Vercel Queue delivery is delayed. */
-export async function processPendingNoticeAiJobsInline(limit = 32) {
+export async function processPendingNoticeAiJobsInline(limit = 32, createdSince?: string) {
   const admin = createSupabaseAdminClient();
-  const { data, error } = await admin.from("notice_ai_jobs").select("id").eq("status", "대기").order("created_at", { ascending: true }).limit(limit);
+  let query = admin.from("notice_ai_jobs").select("id").eq("status", "대기").order("created_at", { ascending: true }).limit(limit);
+  if (createdSince) query = query.gte("created_at", createdSince);
+  const { data, error } = await query;
   if (error) throw error;
   const { data: activeBatch } = await admin.from("batch_runs").select("id").in("status", ["실행 중", "분석 중"]).order("started_at", { ascending: false }).limit(1).maybeSingle();
   let processed = 0;

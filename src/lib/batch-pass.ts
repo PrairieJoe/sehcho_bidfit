@@ -64,11 +64,11 @@ export async function runGithubActionsBatch() {
     let aiProcessed = 0;
     for (let cycle = 0; cycle < 1_000; cycle += 1) {
       console.log(`[Batch] cycle=${cycle + 1} attachmentProcessed=${attachmentProcessed} aiProcessed=${aiProcessed}`);
-      attachmentProcessed += await processPendingAttachmentJobsInline(40, false);
-      aiProcessed += await processPendingNoticeAiJobsInline(4);
+      attachmentProcessed += await processPendingAttachmentJobsInline(40, false, String(started.started_at));
+      aiProcessed += await processPendingNoticeAiJobsInline(4, String(started.started_at));
       const [{ count: pendingAttachments }, { count: pendingAi }] = await Promise.all([
-        admin.from("processing_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]),
-        admin.from("notice_ai_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]),
+        admin.from("processing_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]).gte("created_at", String(started.started_at)),
+        admin.from("notice_ai_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]).gte("created_at", String(started.started_at)),
       ]);
       console.log(`[Batch] pending attachments=${pendingAttachments ?? 0} ai=${pendingAi ?? 0}`);
       if ((pendingAttachments ?? 0) === 0 && (pendingAi ?? 0) === 0) break;
