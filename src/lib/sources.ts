@@ -25,14 +25,17 @@ function requestDate(date: Date) {
 }
 async function fetchApiPage(url: URL, businessType: string) {
   let lastError: unknown;
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
+  // data.go.kr occasionally drops TLS connections from hosted runners. Use a
+  // longer bounded backoff here because the worker is allowed to run for hours
+  // and a transient transport failure must not create a false partial batch.
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
     try {
       const response = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(30_000) });
       if (!response.ok) throw new Error(`나라장터 ${businessType} 목록 조회 실패 (${response.status})`);
       return await response.json() as { response?: { header?: { resultCode?: string | number; resultMsg?: string }; body?: { items?: { item?: Record<string, unknown> | Record<string, unknown>[] } | Record<string, unknown>[]; totalCount?: number } } };
     } catch (error) {
       lastError = error;
-      if (attempt < 3) await new Promise((resolve) => setTimeout(resolve, attempt * 2_000));
+      if (attempt < 5) await new Promise((resolve) => setTimeout(resolve, 2 ** attempt * 1_000));
     }
   }
   throw lastError instanceof Error ? lastError : new Error(`나라장터 ${businessType} 목록 조회 실패`);
