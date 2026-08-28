@@ -154,12 +154,14 @@ export async function processNoticeAiJob(aiJobId: string, batchId?: string) {
 }
 
 /** Safety-net worker for hosts where Vercel Queue delivery is delayed. */
-export async function processPendingNoticeAiJobsInline(limit = 32, createdSince?: string, noticeIds?: string[]) {
+export async function processPendingNoticeAiJobsInline(limit = 32, createdSince?: string, noticeIds?: string[], resetCurrentInFlight = false) {
   const admin = createSupabaseAdminClient();
   if (noticeIds?.length) {
     const staleBefore = new Date(Date.now() - 60_000).toISOString();
     for (let index = 0; index < noticeIds.length; index += 100) {
-      const { data: stale, error } = await admin.from("notice_ai_jobs").select("id").eq("status", "처리 중").lt("updated_at", staleBefore).in("notice_id", noticeIds.slice(index, index + 100));
+      let staleQuery = admin.from("notice_ai_jobs").select("id").eq("status", "처리 중").in("notice_id", noticeIds.slice(index, index + 100));
+      if (!resetCurrentInFlight) staleQuery = staleQuery.lt("updated_at", staleBefore);
+      const { data: stale, error } = await staleQuery;
       if (error) throw error;
       const ids = (stale ?? []).map((row: Row) => String(row.id));
       if (ids.length) {

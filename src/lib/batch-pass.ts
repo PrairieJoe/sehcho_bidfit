@@ -72,6 +72,11 @@ export async function runGithubActionsBatch() {
     // becomes ready; rescanning every notice on every cycle caused a large
     // Supabase round-trip bottleneck.
     await enqueueReadyNoticeAiJobs({ publish: false, noticeIds: collection.noticeIds });
+    // A previous Vercel Queue consumer may still own a job for one of the
+    // just-collected notices. The GitHub worker is the authoritative drain for
+    // this run, so release those in-flight claims once before processing.
+    await processPendingAttachmentJobsInline(0, false, undefined, collection.noticeIds, true);
+    await processPendingNoticeAiJobsInline(0, undefined, collection.noticeIds, true);
     let attachmentProcessed = 0;
     let aiProcessed = 0;
     for (let cycle = 0; cycle < 1_000; cycle += 1) {
