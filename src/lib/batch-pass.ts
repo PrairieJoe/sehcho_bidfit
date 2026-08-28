@@ -76,10 +76,10 @@ export async function runGithubActionsBatch() {
     }
     await finishActiveBatchIfDrained();
     const { count: analyzed } = await admin.from("topic_scores").select("id", { count: "exact", head: true }).gte("updated_at", String(started.started_at));
-    const { count: remainingAttachments } = await admin.from("processing_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]);
-    const { count: remainingAi } = await admin.from("notice_ai_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]);
-    const { count: failedAttachments } = await admin.from("processing_jobs").select("id", { count: "exact", head: true }).eq("status", "실패").gte("updated_at", String(started.started_at));
-    const { count: failedAi } = await admin.from("notice_ai_jobs").select("id", { count: "exact", head: true }).eq("status", "실패").gte("updated_at", String(started.started_at));
+    const { count: remainingAttachments } = await admin.from("processing_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]).gte("created_at", String(started.started_at));
+    const { count: remainingAi } = await admin.from("notice_ai_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]).gte("created_at", String(started.started_at));
+    const { count: failedAttachments } = await admin.from("processing_jobs").select("id", { count: "exact", head: true }).eq("status", "실패").gte("created_at", String(started.started_at));
+    const { count: failedAi } = await admin.from("notice_ai_jobs").select("id", { count: "exact", head: true }).eq("status", "실패").gte("created_at", String(started.started_at));
     const complete = (remainingAttachments ?? 0) === 0 && (remainingAi ?? 0) === 0 && (failedAttachments ?? 0) === 0 && (failedAi ?? 0) === 0;
     const errorSummary = complete ? null : `처리 미완료: 대기 첨부 ${remainingAttachments ?? 0}건·대기 AI ${remainingAi ?? 0}건·실패 첨부 ${failedAttachments ?? 0}건·실패 AI ${failedAi ?? 0}건`;
     await admin.from("batch_runs").update({ status: complete ? "완료" : "부분 완료", completed_at: new Date().toISOString(), discovered: collection.discovered, changed: collection.changed, analyzed: analyzed ?? 0, api_calls: collection.queryCount, window_start: collection.windowStart, window_end: collection.windowEnd, window_hours: collection.windowHours, error_summary: errorSummary }).eq("id", started.id);
