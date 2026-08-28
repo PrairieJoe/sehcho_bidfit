@@ -1,6 +1,7 @@
 import JSZip from "jszip";
 import type { Attachment } from "@/lib/types";
 import { extractHwpText } from "@/lib/hwp-text";
+import { extractPdfTextWithTraditionalOcr } from "@/lib/traditional-ocr";
 
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 const MAX_EXTRACTED_TEXT_CHARS = 200_000;
@@ -8,10 +9,22 @@ const MAX_EXTRACTED_TEXT_CHARS = 200_000;
 function extensionOf(name: string) { return name.split("?")[0].split(".").pop()?.toLowerCase() ?? ""; }
 function cleanXml(value: string) { return value.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim(); }
 
+async function extractOfficeText(bytes: Buffer, extension: string) {
+  const archive = await JSZip.loadAsync(bytes);
+  const files = Object.values(archive.files);
+  const matching = extension === "docx"
+    ? files.filter((file) => /^word\/(document|header\d+|footer\d+)\.xml$/i.test(file.name))
+    : extension === "pptx"
+      ? files.filter((file) => /^ppt\/slides\/slide\d+\.xml$/i.test(file.name))
+      : files.filter((file) => /^xl\/(sharedStrings|worksheets\/sheet\d+)\.xml$/i.test(file.name));
+  const text = (await Promise.all(matching.map((file) => file.async("string")))).map(cleanXml).filter(Boolean).join("\n");
+  return { text, pages: matching.length || undefined };
+}
+
 export async function processAttachment(noticeId: string, attachment: Attachment): Promise<Attachment> {
   const extension = extensionOf(attachment.name || attachment.sourceUrl || "");
   if (!attachment.sourceUrl || attachment.sourceUrl.startsWith("unavailable:")) return { ...attachment, status: "보류", failureReason: "나라장터 API가 첨부파일 다운로드 주소를 제공하지 않았습니다." };
-  if (!['pdf', 'hwpx', 'hwp'].includes(extension)) return { ...attachment, status: "보류", failureReason: "PDF·HWP·HWPX만 현재 처리합니다." };
+  if (!['pdf', 'hwpx', 'hwp', 'docx', 'xlsx', 'pptx'].includes(extension)) return { ...attachment, status: "보류", failureReason: "지원하지 않는 파일 형식입니다. PDF·HWP·HWPX·DOCX·XLSX·PPTX만 처리합니다." };
   try {
     const response = await fetch(attachment.sourceUrl, { cache: "no-store", redirect: "follow", signal: AbortSignal.timeout(5_000) });
     if (!response.ok) return { ...attachment, status: "다운로드 실패", failureReason: `다운로드 HTTP ${response.status}` };
@@ -30,13 +43,20 @@ export async function processAttachment(noticeId: string, attachment: Attachment
       const parsed = await parser(bytes);
       text = parsed.text;
       pages = parsed.numpages;
+      if (!text.trim()) text = await extractPdfTextWithTraditionalOcr(bytes);
     } else {
-      const archive = await JSZip.loadAsync(bytes);
-      const sections = Object.values(archive.files).filter((file) => /(^|\/)Contents\/section\d+\.xml$/i.test(file.name));
-      text = (await Promise.all(sections.map((file) => file.async("string")))).map(cleanXml).join("\n");
-      pages = sections.length || undefined;
+      if (extension === "hwpx") {
+        const archive = await JSZip.loadAsync(bytes);
+        const sections = Object.values(archive.files).filter((file) => /(^|\/)Contents\/section\d+\.xml$/i.test(file.name));
+        text = (await Promise.all(sections.map((file) => file.async("string")))).map(cleanXml).join("\n");
+        pages = sections.length || undefined;
+      } else {
+        const extracted = await extractOfficeText(bytes, extension);
+        text = extracted.text;
+        pages = extracted.pages;
+      }
     }
-    if (!text.trim()) return { ...attachment, status: "부분 분석", pages, failureReason: "텍스트를 추출하지 못했습니다. 원문 확인이 필요합니다." };
+    if (!text.trim()) return { ...attachment, status: "부분 분석", pages, failureReason: extension === "pdf" && process.env.OCR_ENABLED !== "true" ? "텍스트 레이어가 없는 PDF입니다. GitHub Actions OCR 재처리 대기" : "텍스트를 추출하지 못했습니다. 원문 확인이 필요합니다." };
     return { ...attachment, status: "분석 완료", pages, extractedText: text.slice(0, MAX_EXTRACTED_TEXT_CHARS) };
   } catch (error) {
     return { ...attachment, status: "추출 실패", failureReason: error instanceof Error ? error.message : "첨부파일 처리 중 알 수 없는 오류" };

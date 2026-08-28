@@ -30,6 +30,7 @@ jobs:
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.5-flash-lite' }}
       NODE_OPTIONS: --dns-result-order=ipv4first
+      OCR_ENABLED: "true"
       FORCE_DAILY_BATCH: ${{ inputs.force || 'false' }}
     steps:
       - uses: actions/checkout@v4
@@ -41,6 +42,10 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Install traditional OCR tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes tesseract-ocr tesseract-ocr-kor poppler-utils
       - name: Diagnose Nara API connectivity
         run: |
           echo "[nara-preflight] DNS records"

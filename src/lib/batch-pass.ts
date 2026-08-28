@@ -1,4 +1,4 @@
-import { enqueuePendingAttachmentJobs, finishActiveBatchIfDrained, processPendingAttachmentJobsInline } from "@/lib/attachment-pass";
+import { enqueuePendingAttachmentJobs, finishActiveBatchIfDrained, processPendingAttachmentJobsInline, requeueTraditionalOcrCandidates } from "@/lib/attachment-pass";
 import { runCollectionPass } from "@/lib/collection-pass";
 import { enqueueReadyNoticeAiJobs, processPendingNoticeAiJobsInline } from "@/lib/notice-ai-pass";
 import { ensureDefaultTopic } from "@/lib/repository";
@@ -156,6 +156,8 @@ export async function runGithubActionsBatch() {
     // becomes ready; rescanning every notice on every cycle caused a large
     // Supabase round-trip bottleneck.
     await enqueueReadyNoticeAiJobs({ publish: false, noticeIds: collection.noticeIds });
+    const ocrRequeued = await requeueTraditionalOcrCandidates(collection.noticeIds);
+    if (ocrRequeued) console.log(`[Batch] traditional OCR candidates requeued=${ocrRequeued}`);
     const carriedScores = await carryForwardUnchangedScores(admin, collection.noticeIds, String(started.id));
     // Never invent a score for an attachment-backed notice. It is published
     // only after every attachment is text-ready and Gemini succeeds. Notices
