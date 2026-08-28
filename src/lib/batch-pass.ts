@@ -26,14 +26,16 @@ type BatchDiagnostics = {
   attachmentReadyWithoutGemini: number;
   noAttachmentWithoutGemini: number;
   quotaFailures: number;
+  attachmentStatusSets: Record<string, number>;
+  attachmentFailureReasons: Record<string, number>;
   aiFailureReasons: Record<string, number>;
 };
 
 async function currentBatchDiagnostics(admin: any, noticeIds: string[], batchId: string, startedAt: string): Promise<BatchDiagnostics> {
-  const result: BatchDiagnostics = { geminiAttachment: 0, geminiTitleOnly: 0, attachmentNotReady: 0, attachmentReadyWithoutGemini: 0, noAttachmentWithoutGemini: 0, quotaFailures: 0, aiFailureReasons: {} };
+  const result: BatchDiagnostics = { geminiAttachment: 0, geminiTitleOnly: 0, attachmentNotReady: 0, attachmentReadyWithoutGemini: 0, noAttachmentWithoutGemini: 0, quotaFailures: 0, attachmentStatusSets: {}, attachmentFailureReasons: {}, aiFailureReasons: {} };
   for (let index = 0; index < noticeIds.length; index += 100) {
     const ids = noticeIds.slice(index, index + 100);
-    const { data, error } = await admin.from("notices").select("id,attachments(status),topic_scores(analysis)").in("id", ids);
+    const { data, error } = await admin.from("notices").select("id,attachments(status,failure_reason),topic_scores(analysis)").in("id", ids);
     if (error) throw error;
     for (const notice of data ?? []) {
       const attachments = Array.isArray(notice.attachments) ? notice.attachments : [];
@@ -44,7 +46,16 @@ async function currentBatchDiagnostics(admin: any, noticeIds: string[], batchId:
         else result.geminiTitleOnly += 1;
       } else if (!attachments.length) result.noAttachmentWithoutGemini += 1;
       else if (attachments.every((attachment: any) => String(attachment.status) === "분석 완료")) result.attachmentReadyWithoutGemini += 1;
-      else result.attachmentNotReady += 1;
+      else {
+        result.attachmentNotReady += 1;
+        const statusSet = attachments.map((attachment: any) => String(attachment.status)).sort().join(" + ");
+        result.attachmentStatusSets[statusSet] = (result.attachmentStatusSets[statusSet] ?? 0) + 1;
+        for (const attachment of attachments) {
+          if (String(attachment.status) === "분석 완료") continue;
+          const reason = String(attachment.failure_reason ?? "사유 미기록");
+          result.attachmentFailureReasons[reason] = (result.attachmentFailureReasons[reason] ?? 0) + 1;
+        }
+      }
     }
     const { data: jobs, error: jobsError } = await admin.from("notice_ai_jobs").select("status,failure_reason").in("notice_id", ids).gte("updated_at", startedAt).eq("status", "실패");
     if (jobsError) throw jobsError;
