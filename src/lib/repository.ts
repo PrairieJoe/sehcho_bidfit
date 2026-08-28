@@ -25,9 +25,7 @@ const noticeOf = (row: Row, state?: Row, allowLegacyAnalysis = false): BidNotice
   // A current score is publishable when it matches the current notice source
   // fingerprint. Gemini rows are created only after their attachment-readiness
   // gate; a matching carried-forward Gemini result remains valid even if a
-  // later collection has queued the same attachment again. Quota fallbacks are
-  // likewise title/description based and intentionally available before text
-  // extraction. Requiring today's attachment state here hid valid scores.
+  // later collection has queued the same attachment again.
   const analysis = candidate && (allowLegacyAnalysis || candidateHash === String(row.source_hash ?? "")) ? candidate : undefined;
   return { id: String(row.id), bidNumber: String(row.bid_number), order: String(row.bid_order), title: String(row.title), businessType: String(row.business_type) as BidNotice["businessType"], status: String(row.status) as BidNotice["status"], agency: String(row.agency), demandAgency: String(row.demand_agency), region: String(row.region), publishedAt: String(row.published_at ?? ""), closesAt: String(row.closes_at ?? ""), budget: row.budget === null ? null : Number(row.budget), budgetLabel: String(row.budget_label), contractMethod: String(row.contract_method), detailUrl: String(row.detail_url), description: String(row.description), tasks: array(row.tasks), qualifications: array(row.qualifications), changeSummary: String(row.change_summary ?? "") || undefined, attachments, analysis, reviewState: state?.review_state as BidNotice["reviewState"] ?? "검토 전", memo: String(state?.memo ?? "") || undefined };
 };
@@ -72,7 +70,10 @@ export class PublicRepository {
       const scores = (row.topic_scores as Row[] | undefined)?.filter((score) => {
         const analysis = score.analysis as Row | undefined;
         const samePublishedBatch = window.completedId && analysis?.batchId ? String(analysis.batchId) === window.completedId : true;
-        return score.topic_id === topic.id && typeof analysis?.aiModel === "string" && samePublishedBatch && (!window.after || String(score.updated_at ?? "") >= window.after) && (!window.before || String(score.updated_at ?? "") < window.before);
+        // Historic rule-based quota fallbacks remain auditable in Supabase but
+        // are never displayed as analysis results.
+        const isGemini = String(analysis?.aiModel ?? "").toLowerCase().startsWith("gemini");
+        return score.topic_id === topic.id && isGemini && samePublishedBatch && (!window.after || String(score.updated_at ?? "") >= window.after) && (!window.before || String(score.updated_at ?? "") < window.before);
       });
       const notice = noticeOf({ ...row, topic_scores: scores }, undefined, Boolean(window.before && window.hasCompleted));
       // The score's completed batch is the authoritative membership marker

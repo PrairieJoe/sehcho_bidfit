@@ -9,6 +9,18 @@ const MAX_OUTPUT_TOKENS = 700;
 type GeminiResponse = { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
 type GeminiAnalysis = { score?: number; summary?: string; reasons?: string[]; penalties?: string[]; eligibilityStatus?: AnalysisResult["eligibilityStatus"]; confidence?: AnalysisResult["confidence"] };
 
+/** API quota rejection must remain distinguishable from a malformed AI reply. */
+export class GeminiQuotaError extends Error {
+  constructor(public readonly status: number, detail: string) {
+    super(`Gemini 무료 플랜 할당량 초과(HTTP ${status}): ${detail}`);
+    this.name = "GeminiQuotaError";
+  }
+}
+
+export function isGeminiQuotaResponse(status: number, detail: string) {
+  return status === 429 || /RESOURCE_EXHAUSTED|quota|rate limit/i.test(detail);
+}
+
 function grade(score: number): AnalysisResult["grade"] { return score >= 85 ? "매우 높음" : score >= 70 ? "높음" : score >= 50 ? "보통" : "낮음"; }
 function parseJson(text: string): GeminiAnalysis | null { try { return JSON.parse(text.replace(/^```json\s*|\s*```$/g, "").trim()) as GeminiAnalysis; } catch { return null; } }
 
@@ -26,6 +38,7 @@ export async function analyzeWithGemini(notice: BidNotice, topic: Topic): Promis
   const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`, { method: "POST", headers: { "content-type": "application/json", "x-goog-api-key": apiKey }, body: JSON.stringify({ contents: [{ role: "user", parts: [{ text: prompt }] }], generationConfig: { responseMimeType: "application/json", maxOutputTokens: MAX_OUTPUT_TOKENS, temperature: 0.1 } }), signal: AbortSignal.timeout(60_000) });
   if (!response.ok) {
     const detail = (await response.text()).replace(/\s+/g, " ").slice(0, 300);
+    if (isGeminiQuotaResponse(response.status, detail)) throw new GeminiQuotaError(response.status, detail);
     throw new Error(`Gemini API HTTP ${response.status}: ${detail}`);
   }
   const payload = await response.json() as GeminiResponse;

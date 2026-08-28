@@ -41,9 +41,9 @@ Vercel 프로젝트의 `Settings → Environment Variables`에서 `Production` �
 
 ### GitHub Actions 설정
 
-저장소 `Settings → Secrets and variables → Actions`에 `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `NARAJANGTEO_SERVICE_KEY`, `GEMINI_API_KEY`를 Secrets로 등록합니다. 필요하면 Variables에 `GEMINI_MODEL`을 등록하며 기본값은 `gemini-2.5-flash-lite`입니다. 첫 실행은 Actions 탭의 `Run workflow`로 검증하고 이후 매일 자동 실행됩니다.
+저장소 `Settings → Secrets and variables → Actions`에 `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `NARAJANGTEO_SERVICE_KEY`, `GEMINI_API_KEY`를 Secrets로 등록합니다. 필요하면 Variables에 `GEMINI_MODEL`을 등록하며 기본값은 `gemini-3.5-flash-lite`입니다. 첫 실행은 Actions 탭의 `Run workflow`로 검증하고 이후 매일 자동 실행됩니다.
 
-스캔 PDF·이미지·표·도면은 분석 범위에 포함하지 않습니다. 텍스트를 추출하지 못한 파일은 분석 제외 사유만 기록합니다. Gemini Free Tier는 요청·토큰 한도가 변동될 수 있으므로, 배포 전에 Google AI Studio의 프로젝트별 Rate limit을 확인해야 합니다.
+스캔 PDF·이미지·표·도면은 분석 범위에 포함하지 않습니다. 첨부파일이 있는 공고는 모든 첨부 텍스트가 준비되고 Gemini 분석이 성공할 때만 점수를 표시합니다. 첨부파일이 없는 공고만 Gemini의 공고명·설명 분석을 사용합니다. Gemini Free Tier의 실제 할당량 거절(HTTP 429·`RESOURCE_EXHAUSTED`)은 `notice_ai_jobs.failure_reason`에 별도 기록되며, 규칙 기반 점수로 대체하지 않습니다.
 
 ## 개발 검증
 

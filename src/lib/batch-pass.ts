@@ -3,7 +3,6 @@ import { runCollectionPass } from "@/lib/collection-pass";
 import { enqueueReadyNoticeAiJobs, processPendingNoticeAiJobsInline } from "@/lib/notice-ai-pass";
 import { ensureDefaultTopic } from "@/lib/repository";
 import { createSupabaseAdminClient } from "@/lib/supabase";
-import type { AnalysisResult, Topic } from "@/lib/types";
 
 async function countCurrentJobs(admin: any, table: string, noticeIds: string[], statuses: string[], attachmentRelation = false) {
   let total = 0;
@@ -17,15 +16,8 @@ async function countCurrentJobs(admin: any, table: string, noticeIds: string[], 
   return total;
 }
 
-const topicFromRow = (row: any): Topic => ({
-  id: String(row.id), name: String(row.name), description: String(row.description ?? ""), capabilities: String(row.capabilities ?? ""),
-  includeKeywords: Array.isArray(row.include_keywords) ? row.include_keywords.map(String) : [],
-  excludeKeywords: Array.isArray(row.exclude_keywords) ? row.exclude_keywords.map(String) : [],
-  businessTypes: Array.isArray(row.business_types) ? row.business_types : ["용역"],
-  regions: Array.isArray(row.regions) ? row.regions.map(String) : [],
-  minBudget: row.min_budget == null ? null : Number(row.min_budget), maxBudget: row.max_budget == null ? null : Number(row.max_budget),
-  minimumDays: Number(row.minimum_days ?? 0), threshold: Number(row.threshold ?? 70),
-});
+const isGeminiAnalysis = (analysis: Record<string, unknown> | null | undefined) =>
+  String(analysis?.aiModel ?? "").toLowerCase().startsWith("gemini");
 
 /**
  * A force/recovery run can collect the exact same notice after its attachment
@@ -47,7 +39,9 @@ async function carryForwardUnchangedScores(admin: any, noticeIds: string[], batc
     const hashByNotice = new Map((notices ?? []).map((notice: any) => [String(notice.id), String(notice.source_hash ?? "")]));
     for (const score of scores ?? []) {
       const analysis = score.analysis as Record<string, unknown> | null;
-      if (!analysis || typeof analysis.aiModel !== "string" || String(analysis.sourceHash ?? "") !== hashByNotice.get(String(score.notice_id))) continue;
+      // A quota fallback is not a publishable result; only preserve Gemini
+      // output whose source fingerprint still matches this notice.
+      if (!analysis || !isGeminiAnalysis(analysis) || String(analysis.sourceHash ?? "") !== hashByNotice.get(String(score.notice_id))) continue;
       if (String(analysis.batchId ?? "") === batchId) continue;
       const { error } = await admin.from("topic_scores").update({ analysis: { ...analysis, batchId }, updated_at: new Date().toISOString() }).eq("id", score.id);
       if (error) throw error;
@@ -55,64 +49,6 @@ async function carryForwardUnchangedScores(admin: any, noticeIds: string[], batc
     }
   }
   return carried;
-}
-
-function quotaFallbackAnalysis(notice: any, topic: Topic, batchId: string): AnalysisResult & { sourceHash: string; batchId: string } {
-  const text = `${String(notice.title ?? "")} ${String(notice.description ?? "")} ${Array.isArray(notice.tasks) ? notice.tasks.join(" ") : ""}`.toLowerCase();
-  const include = [...topic.includeKeywords, ...topic.name.split(/[\s·,()/]+/)].map((keyword) => keyword.trim().toLowerCase()).filter((keyword) => keyword.length >= 2);
-  const exclude = topic.excludeKeywords.map((keyword) => keyword.trim().toLowerCase()).filter(Boolean);
-  const matched = include.filter((keyword) => text.includes(keyword));
-  const excluded = exclude.some((keyword) => text.includes(keyword));
-  // Preserve Gemini capacity for attachment-backed evidence. This transparent
-  // fallback makes every collected service notice comparable, but never grants
-  // a high-confidence recommendation without Gemini/document evidence.
-  const score = excluded ? 0 : Math.min(60, matched.length * 20);
-  return {
-    score,
-    grade: score >= 50 ? "보통" : "낮음",
-    confidence: "낮음",
-    eligibilityStatus: "확인 필요",
-    summary: matched.length ? `공고명·설명에서 관심 주제 관련 표현(${matched.join(", ")})을 확인했습니다. 첨부문서 근거는 아직 반영되지 않았습니다.` : "공고명·설명에서 관심 주제와의 직접적인 관련 표현을 확인하지 못했습니다.",
-    components: [{ name: "공고명·설명 보조 점수", score, maxScore: 100 }],
-    positiveReasons: [{ label: "Gemini 할당량 보존용 보조 분석", text: matched.length ? `일치 표현: ${matched.join(", ")}` : "직접 일치 표현 없음", source: "공고명·공고 설명", location: "자동 선별" }],
-    penalties: excluded ? ["제외 키워드가 공고명 또는 설명에서 확인되었습니다."] : [],
-    uncertainties: ["Gemini·첨부문서 분석 전의 낮은 신뢰도 보조 점수입니다."],
-    aiModel: "rule-based-quota-fallback",
-    promptVersion: "notice-fallback-v2",
-    sourceHash: String(notice.source_hash ?? ""),
-    batchId,
-  };
-}
-
-async function fillQuotaFallbackScores(admin: any, noticeIds: string[], batchId: string) {
-  const { data: topics, error: topicsError } = await admin.from("topics").select("*").limit(10);
-  if (topicsError) throw topicsError;
-  let created = 0;
-  for (let index = 0; index < noticeIds.length; index += 100) {
-    const ids = noticeIds.slice(index, index + 100);
-    const [{ data: notices, error: noticesError }, { data: scores, error: scoresError }] = await Promise.all([
-      admin.from("notices").select("id,title,description,tasks,source_hash").in("id", ids),
-      admin.from("topic_scores").select("topic_id,notice_id,analysis").in("notice_id", ids),
-    ]);
-    if (noticesError) throw noticesError;
-    if (scoresError) throw scoresError;
-    for (const topicRow of topics ?? []) {
-      const topic = topicFromRow(topicRow);
-      const rows = (notices ?? []).filter((notice: any) => {
-        const score = (scores ?? []).find((candidate: any) => String(candidate.topic_id) === String(topic.id) && String(candidate.notice_id) === String(notice.id));
-        const analysis = score?.analysis as Record<string, unknown> | undefined;
-        return !analysis || String(analysis.sourceHash ?? "") !== String(notice.source_hash ?? "");
-      }).map((notice: any) => {
-        const analysis = quotaFallbackAnalysis(notice, topic, batchId);
-        return { topic_id: topic.id, notice_id: notice.id, analysis, score: analysis.score, updated_at: new Date().toISOString() };
-      });
-      if (!rows.length) continue;
-      const { error } = await admin.from("topic_scores").upsert(rows, { onConflict: "topic_id,notice_id" });
-      if (error) throw error;
-      created += rows.length;
-    }
-  }
-  return created;
 }
 
 /** Runs the daily unit of work and records the outcome shown on the dashboard. */
@@ -172,7 +108,9 @@ export async function runGithubActionsBatch() {
     // Supabase round-trip bottleneck.
     await enqueueReadyNoticeAiJobs({ publish: false, noticeIds: collection.noticeIds });
     const carriedScores = await carryForwardUnchangedScores(admin, collection.noticeIds, String(started.id));
-    const fallbackScores = await fillQuotaFallbackScores(admin, collection.noticeIds, String(started.id));
+    // Never invent a score for an attachment-backed notice. It is published
+    // only after every attachment is text-ready and Gemini succeeds. Notices
+    // without attachments are already queued for Gemini title-only analysis.
     // A previous Vercel Queue consumer may still own a job for one of the
     // just-collected notices. The GitHub worker is the authoritative drain for
     // this run, so release those in-flight claims once before processing.
@@ -221,7 +159,7 @@ export async function runGithubActionsBatch() {
     const complete = (remainingAttachments ?? 0) === 0 && (remainingAi ?? 0) === 0;
     const errorSummary = complete && !(failedAttachments || failedAi) ? null : `일부 처리 제외: 실패 첨부 ${failedAttachments}건·실패 AI ${failedAi}건`;
     await admin.from("batch_runs").update({ status: complete ? "완료" : "부분 완료", completed_at: new Date().toISOString(), discovered: collection.discovered, changed: collection.changed, analyzed, api_calls: collection.queryCount, window_start: collection.windowStart, window_end: collection.windowEnd, window_hours: collection.windowHours, error_summary: errorSummary }).eq("id", started.id);
-    return { ...collection, attachmentProcessed, aiProcessed, carriedScores, fallbackScores, analyzed, complete };
+    return { ...collection, attachmentProcessed, aiProcessed, carriedScores, analyzed, complete };
   } catch (error) {
     await admin.from("batch_runs").update({ status: "부분 완료", completed_at: new Date().toISOString(), error_summary: error instanceof Error ? error.message : "작업자 실행 실패" }).eq("id", started.id);
     throw error;

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { send } from "@vercel/queue";
 import { finishActiveBatchIfDrained } from "@/lib/attachment-pass";
-import { analyzeWithGemini } from "@/lib/gemini";
+import { analyzeWithGemini, GeminiQuotaError } from "@/lib/gemini";
 import { createSupabaseAdminClient } from "@/lib/supabase";
 import type { BidNotice, Topic } from "@/lib/types";
 
@@ -145,7 +145,9 @@ export async function processNoticeAiJob(aiJobId: string, batchId?: string) {
     await finishActiveBatchIfDrained();
     return { skipped: false, analyzed: (topics ?? []).length };
   } catch (cause) {
-    const reason = cause instanceof Error ? cause.message : "AI 분석 실패";
+    const reason = cause instanceof GeminiQuotaError
+      ? `Gemini quota 초과로 분석을 보류했습니다. ${cause.message}`
+      : cause instanceof Error ? cause.message : "AI 분석 실패";
     console.error(`[Gemini] 실패 job=${aiJobId}: ${reason}`);
     await admin.from("notice_ai_jobs").update({ status: "실패", failure_reason: reason, updated_at: new Date().toISOString() }).eq("id", aiJobId);
     await finishActiveBatchIfDrained();
