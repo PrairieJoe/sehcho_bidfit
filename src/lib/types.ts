@@ -104,6 +104,9 @@ export interface BatchRun {
   analyzed: number;
   notified: number;
   apiCalls: number;
+  windowStart?: string;
+  windowEnd?: string;
+  windowHours?: number;
   errorSummary?: string;
 }
 

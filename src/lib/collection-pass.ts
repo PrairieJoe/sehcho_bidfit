@@ -1,5 +1,6 @@
 import { getBidSource } from "@/lib/sources";
 import { createSupabaseAdminClient } from "@/lib/supabase";
+import { chooseAnalysisWindow } from "@/lib/collection-window";
 
 const chunk = <T,>(items: T[], size: number) => Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, (index + 1) * size));
 async function retryQuery<T>(operation: () => Promise<{ data: T | null; error: { message?: string } | null }>, attempts = 3) {
@@ -15,8 +16,14 @@ async function retryQuery<T>(operation: () => Promise<{ data: T | null; error: {
   throw last instanceof Error ? last : new Error("Supabase 저장 재시도 실패");
 }
 
-export async function runCollectionPass() {
-  const notices = await getBidSource().listNotices(new Date(Date.now() - 72 * 3_600_000), new Date());
+export async function runCollectionPass(runStartedAt = new Date()) {
+  const windowEnd = runStartedAt;
+  const source = getBidSource();
+  const longWindowStart = new Date(windowEnd.getTime() - 72 * 3_600_000);
+  const longWindowNotices = await source.listNotices(longWindowStart, windowEnd);
+  const selectedWindow = chooseAnalysisWindow(longWindowNotices.length, windowEnd, Number(process.env.GEMINI_DAILY_NOTICE_LIMIT ?? 100));
+  const { windowStart, windowHours, useShortWindow } = selectedWindow;
+  const notices = useShortWindow ? await source.listNotices(windowStart, windowEnd) : longWindowNotices;
   // A missing/invalid deadline is a data-quality issue, not a reason to drop
   // the notice. Keep the notice in the daily snapshot so the user can see it
   // and the detail page can show “확인 필요” instead of silently losing it.
@@ -47,5 +54,5 @@ export async function runCollectionPass() {
   // Existing completed jobs must not be reset to "대기" every day. New and stale
   // jobs are published to Vercel Queue by the batch coordinator instead.
   for (const part of chunk(savedAttachments.map((row) => ({ attachment_id: row.id, status: "대기", failure_reason: null, updated_at: now })), 25)) { if (!part.length) continue; await retryQuery(async () => await admin.from("processing_jobs").upsert(part, { onConflict: "attachment_id", ignoreDuplicates: true }).select()); }
-  return { discovered: validNotices.length, changed: validNotices.filter((notice) => notice.status === "정정" || notice.status === "재공고").length, missingDeadline: notices.length - validNotices.length, noticeIds: savedRows.map((row) => String(row.id)) };
+  return { discovered: validNotices.length, changed: validNotices.filter((notice) => notice.status === "정정" || notice.status === "재공고").length, missingDeadline: notices.length - validNotices.length, noticeIds: savedRows.map((row) => String(row.id)), windowStart: windowStart.toISOString(), windowEnd: windowEnd.toISOString(), windowHours, queryCount: selectedWindow.queryCount };
 }

@@ -2,7 +2,7 @@ name: BidFit daily collection and analysis
 
 on:
   schedule:
-    - cron: "0 23 * * *" # 08:00 KST (UTC+9)
+    - cron: "15 23 * * *" # 08:15 KST (UTC+9); within the 08:00-09:00 window
   workflow_dispatch:
 
 concurrency:
@@ -21,6 +21,7 @@ jobs:
       NARAJANGTEO_SERVICE_KEY: ${{ secrets.NARAJANGTEO_SERVICE_KEY }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       GEMINI_MODEL: ${{ vars.GEMINI_MODEL || 'gemini-3.5-flash-lite' }}
+      GEMINI_DAILY_NOTICE_LIMIT: ${{ vars.GEMINI_DAILY_NOTICE_LIMIT || '100' }}
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

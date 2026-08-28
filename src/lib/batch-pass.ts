@@ -21,8 +21,8 @@ export async function runDailyBatch() {
   if (startError || !started) throw startError ?? new Error("실행 이력을 만들 수 없습니다.");
   try {
     await ensureDefaultTopic();
-    const collection = await runCollectionPass();
-    await admin.from("batch_runs").update({ status: "분석 중", discovered: collection.discovered, changed: collection.changed, api_calls: 1 }).eq("id", started.id);
+    const collection = await runCollectionPass(new Date(String(started.started_at)));
+    await admin.from("batch_runs").update({ status: "분석 중", discovered: collection.discovered, changed: collection.changed, api_calls: collection.queryCount, window_start: collection.windowStart, window_end: collection.windowEnd, window_hours: collection.windowHours }).eq("id", started.id);
     const queue = await enqueuePendingAttachmentJobs(40);
     const inlineProcessed = await processPendingAttachmentJobsInline(16);
     const aiQueue = await enqueueReadyNoticeAiJobs();
@@ -30,7 +30,7 @@ export async function runDailyBatch() {
     const result = { ...collection, ...queue, ...aiQueue, inlineProcessed, inlineAiProcessed, analyzed: inlineAiProcessed };
     const { error: finishError } = await admin.from("batch_runs").update({
       status: queue.attachmentQueued || aiQueue.aiQueued ? "분석 중" : "완료", completed_at: queue.attachmentQueued || aiQueue.aiQueued ? null : new Date().toISOString(), discovered: result.discovered,
-      changed: result.changed, analyzed: result.analyzed, api_calls: 1,
+      changed: result.changed, analyzed: result.analyzed, api_calls: result.queryCount,
       error_summary: queue.attachmentQueued || aiQueue.aiQueued ? `첨부문서 ${queue.attachmentQueued}건, 공고 AI 분석 ${aiQueue.aiQueued}건을 대기열에 등록했습니다.` : null,
     }).eq("id", started.id);
     if (finishError) throw finishError;
@@ -53,8 +53,8 @@ export async function runGithubActionsBatch() {
   if (startError || !started) throw startError ?? new Error("실행 이력을 만들 수 없습니다.");
   try {
     await ensureDefaultTopic();
-    const collection = await runCollectionPass();
-    await admin.from("batch_runs").update({ status: "분석 중", discovered: collection.discovered, changed: collection.changed, api_calls: 1 }).eq("id", started.id);
+    const collection = await runCollectionPass(new Date(String(started.started_at)));
+    await admin.from("batch_runs").update({ status: "분석 중", discovered: collection.discovered, changed: collection.changed, api_calls: collection.queryCount, window_start: collection.windowStart, window_end: collection.windowEnd, window_hours: collection.windowHours }).eq("id", started.id);
     // Register no-attachment notices once. Attachment-backed notices enqueue
     // their AI job from processQueuedAttachmentJob as soon as the final file
     // becomes ready; rescanning every notice on every cycle caused a large
@@ -82,7 +82,7 @@ export async function runGithubActionsBatch() {
     const { count: failedAi } = await admin.from("notice_ai_jobs").select("id", { count: "exact", head: true }).eq("status", "실패").gte("updated_at", String(started.started_at));
     const complete = (remainingAttachments ?? 0) === 0 && (remainingAi ?? 0) === 0 && (failedAttachments ?? 0) === 0 && (failedAi ?? 0) === 0;
     const errorSummary = complete ? null : `처리 미완료: 대기 첨부 ${remainingAttachments ?? 0}건·대기 AI ${remainingAi ?? 0}건·실패 첨부 ${failedAttachments ?? 0}건·실패 AI ${failedAi ?? 0}건`;
-    await admin.from("batch_runs").update({ status: complete ? "완료" : "부분 완료", completed_at: new Date().toISOString(), discovered: collection.discovered, changed: collection.changed, analyzed: analyzed ?? 0, api_calls: 1, error_summary: errorSummary }).eq("id", started.id);
+    await admin.from("batch_runs").update({ status: complete ? "완료" : "부분 완료", completed_at: new Date().toISOString(), discovered: collection.discovered, changed: collection.changed, analyzed: analyzed ?? 0, api_calls: collection.queryCount, window_start: collection.windowStart, window_end: collection.windowEnd, window_hours: collection.windowHours, error_summary: errorSummary }).eq("id", started.id);
     return { ...collection, attachmentProcessed, aiProcessed, analyzed: analyzed ?? 0, complete };
   } catch (error) {
     await admin.from("batch_runs").update({ status: "부분 완료", completed_at: new Date().toISOString(), error_summary: error instanceof Error ? error.message : "작업자 실행 실패" }).eq("id", started.id);

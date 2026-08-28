@@ -28,9 +28,9 @@ const noticeOf = (row: Row, state?: Row, allowLegacyAnalysis = false): BidNotice
   const analysis = candidate && (allowLegacyAnalysis || (attachmentsReady && candidateHash === String(row.source_hash ?? ""))) ? candidate : undefined;
   return { id: String(row.id), bidNumber: String(row.bid_number), order: String(row.bid_order), title: String(row.title), businessType: String(row.business_type) as BidNotice["businessType"], status: String(row.status) as BidNotice["status"], agency: String(row.agency), demandAgency: String(row.demand_agency), region: String(row.region), publishedAt: String(row.published_at ?? ""), closesAt: String(row.closes_at ?? ""), budget: row.budget === null ? null : Number(row.budget), budgetLabel: String(row.budget_label), contractMethod: String(row.contract_method), detailUrl: String(row.detail_url), description: String(row.description), tasks: array(row.tasks), qualifications: array(row.qualifications), changeSummary: String(row.change_summary ?? "") || undefined, attachments, analysis, reviewState: state?.review_state as BidNotice["reviewState"] ?? "검토 전", memo: String(state?.memo ?? "") || undefined };
 };
-const runOf = (row: Row): BatchRun => ({ id: String(row.id), startedAt: String(row.started_at), completedAt: row.completed_at ? String(row.completed_at) : undefined, status: String(row.status) as BatchRun["status"], discovered: Number(row.discovered), changed: Number(row.changed), analyzed: Number(row.analyzed), notified: Number(row.notified), apiCalls: Number(row.api_calls), errorSummary: String(row.error_summary ?? "") || undefined });
+const runOf = (row: Row): BatchRun => ({ id: String(row.id), startedAt: String(row.started_at), completedAt: row.completed_at ? String(row.completed_at) : undefined, status: String(row.status) as BatchRun["status"], discovered: Number(row.discovered), changed: Number(row.changed), analyzed: Number(row.analyzed), notified: Number(row.notified), apiCalls: Number(row.api_calls), windowStart: String(row.window_start ?? "") || undefined, windowEnd: String(row.window_end ?? "") || undefined, windowHours: row.window_hours == null ? undefined : Number(row.window_hours), errorSummary: String(row.error_summary ?? "") || undefined });
 async function snapshotWindow(admin: ReturnType<typeof createSupabaseAdminClient>) {
-  const { data: completed } = await admin.from("batch_runs").select("id,started_at").eq("status", "완료").order("started_at", { ascending: false }).limit(1).maybeSingle();
+  const { data: completed } = await admin.from("batch_runs").select("id,started_at,window_start,window_end").eq("status", "완료").order("started_at", { ascending: false }).limit(1).maybeSingle();
   let incomplete: { started_at?: string } | null = null;
   if (completed?.started_at) {
     const { data } = await admin.from("batch_runs").select("started_at").neq("status", "완료").gt("started_at", String(completed.started_at)).order("started_at", { ascending: true }).limit(1).maybeSingle();
@@ -42,8 +42,8 @@ async function snapshotWindow(admin: ReturnType<typeof createSupabaseAdminClient
   // A failed/partial run has already updated notice rows, so using the latest
   // completed timestamp alone would expose that incomplete snapshot. Keep the
   // data strictly before the first incomplete run after the last completion.
-  if (incomplete?.started_at && (!completed?.started_at || String(incomplete.started_at) > String(completed.started_at))) return { completedId: completed?.id ? String(completed.id) : undefined, after: completed?.started_at ? String(completed.started_at) : undefined, before: String(incomplete.started_at), hasCompleted: Boolean(completed?.started_at) };
-  return completed?.started_at ? { completedId: completed.id ? String(completed.id) : undefined, after: String(completed.started_at), hasCompleted: true } : { hasCompleted: false };
+  if (incomplete?.started_at && (!completed?.started_at || String(incomplete.started_at) > String(completed.started_at))) return { completedId: completed?.id ? String(completed.id) : undefined, after: completed?.started_at ? String(completed.started_at) : undefined, before: String(incomplete.started_at), windowStart: completed?.window_start ? String(completed.window_start) : undefined, windowEnd: completed?.window_end ? String(completed.window_end) : undefined, hasCompleted: Boolean(completed?.started_at) };
+  return completed?.started_at ? { completedId: completed.id ? String(completed.id) : undefined, after: String(completed.started_at), windowStart: completed.window_start ? String(completed.window_start) : undefined, windowEnd: completed.window_end ? String(completed.window_end) : undefined, hasCompleted: true } : { hasCompleted: false };
 }
 
 export class PublicRepository {
@@ -66,8 +66,11 @@ export class PublicRepository {
         const samePublishedBatch = window.completedId && analysis?.batchId ? String(analysis.batchId) === window.completedId : true;
         return score.topic_id === topic.id && typeof analysis?.aiModel === "string" && samePublishedBatch && (!window.after || String(score.updated_at ?? "") >= window.after) && (!window.before || String(score.updated_at ?? "") < window.before);
       });
-      return noticeOf({ ...row, topic_scores: scores }, undefined, Boolean(window.before && window.hasCompleted));
-    }).filter((notice) => window.hasCompleted && notice.analysis);
+      const notice = noticeOf({ ...row, topic_scores: scores }, undefined, Boolean(window.before && window.hasCompleted));
+      const publishedAt = String(row.published_at ?? "");
+      const inUnitWindow = !window.windowStart || !window.windowEnd || (Boolean(publishedAt) && new Date(publishedAt).getTime() >= new Date(window.windowStart).getTime() && new Date(publishedAt).getTime() <= new Date(window.windowEnd).getTime());
+      return inUnitWindow ? notice : undefined;
+    }).filter((notice): notice is BidNotice => Boolean(window.hasCompleted && notice?.analysis));
   }
   async getNotice(id: string) { return (await this.listNotices()).find((notice) => notice.id === id); }
   async listNotifications(): Promise<Notification[]> { return []; }

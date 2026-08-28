@@ -80,7 +80,7 @@ export class NarajangteoBidSource implements BidSource {
     const serviceKey = this.configuredKey?.trim().replace(/%([0-9A-Fa-f]{2})/g, (match) => String.fromCharCode(parseInt(match.slice(1), 16)));
     if (!serviceKey) throw new Error("NARAJANGTEO_SERVICE_KEY가 설정되지 않았습니다.");
     const notices: BidNotice[] = [];
-    // Query the service catalogue and walk every page in the 72-hour window.
+    // Query the service catalogue and walk every page in the requested window.
     await Promise.all(LIST_ENDPOINTS.map(async ([businessType, endpoint]) => {
       for (let pageNo = 1; ; pageNo += 1) {
       const url = new URL(`${BASE_URL}/${endpoint}`);
@@ -107,7 +107,7 @@ export class NarajangteoBidSource implements BidSource {
     // Some public-data API partitions lag behind the current date. Keep the daily
     // 72-hour query first, then widen once so a temporary empty partition does not
     // appear as a successful zero-result batch.
-    if (allowFallback && !unique.length && windowEnd.getTime() - windowStart.getTime() <= 72 * 3_600_000 + 60_000) {
+    if (allowFallback && !unique.length && windowEnd.getTime() - windowStart.getTime() >= 71 * 3_600_000) {
       const widened = await this.listNotices(new Date(windowEnd.getTime() - 7 * 86_400_000), windowEnd, false, diagnostics);
       if (!widened.length) throw new Error(`나라장터 조회 결과가 없습니다. ${diagnostics.join(" / ")}`);
       return widened;
