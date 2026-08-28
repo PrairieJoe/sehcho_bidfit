@@ -1,6 +1,6 @@
 import { getBidSource } from "@/lib/sources";
 import { createSupabaseAdminClient } from "@/lib/supabase";
-import { chooseAnalysisWindow } from "@/lib/collection-window";
+import { latestAnalysisWindow } from "@/lib/collection-window";
 
 const chunk = <T,>(items: T[], size: number) => Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, (index + 1) * size));
 async function retryQuery<T>(operation: () => Promise<{ data: T | null; error: { message?: string } | null }>, attempts = 3) {
@@ -19,12 +19,8 @@ async function retryQuery<T>(operation: () => Promise<{ data: T | null; error: {
 export async function runCollectionPass(runStartedAt = new Date()) {
   const windowEnd = runStartedAt;
   const source = getBidSource();
-  const configuredLimit = Number(process.env.GEMINI_DAILY_NOTICE_LIMIT ?? 100);
-  // The daily unit is always 24 hours, so a separate 72-hour count request is
-  // both unnecessary and harmful for Nara's intermittently slow API. It also
-  // used to make one execution perform an avoidable extra HTTPS request.
-  const selectedWindow = chooseAnalysisWindow(0, windowEnd, configuredLimit);
-  const { windowStart, windowHours, useShortWindow } = selectedWindow;
+  const selectedWindow = latestAnalysisWindow(windowEnd);
+  const { windowStart, windowHours } = selectedWindow;
   const notices = await source.listNotices(windowStart, windowEnd);
   // A missing/invalid deadline is a data-quality issue, not a reason to drop
   // the notice. Keep the notice in the daily snapshot so the user can see it
@@ -37,8 +33,7 @@ export async function runCollectionPass(runStartedAt = new Date()) {
     return { bid_number: notice.bidNumber, bid_order: notice.order, title: notice.title, business_type: notice.businessType, status: notice.status, agency: notice.agency, demand_agency: notice.demandAgency, region: notice.region, published_at: notice.publishedAt || null, closes_at: notice.closesAt || null, budget: notice.budget, budget_label: notice.budgetLabel, contract_method: notice.contractMethod, detail_url: notice.detailUrl, description: notice.description, tasks: notice.tasks, qualifications: notice.qualifications, change_summary: notice.changeSummary ?? null, source_hash: sourceHash, updated_at: now };
   });
   const savedRows: Record<string, any>[] = [];
-  // Keep payloads small: a 72-hour service window can contain thousands of
-  // rows and Supabase's edge proxy may return 520 for a large upsert body.
+  // Keep payloads small so Supabase's edge proxy does not reject a large body.
   for (const part of chunk(rows, 10)) {
     if (!part.length) continue;
     const { data } = await retryQuery(async () => await admin.from("notices").upsert(part, { onConflict: "bid_number,bid_order" }).select("id,bid_number,bid_order"));
@@ -49,7 +44,7 @@ export async function runCollectionPass(runStartedAt = new Date()) {
   const versions = validNotices.map((notice) => ({ notice_id: idByKey.get(`${notice.bidNumber}-${notice.order}`), source_hash: JSON.stringify([notice.title, notice.closesAt, notice.status, notice.description]), source_payload: notice }));
   for (const part of chunk(versions.filter((row) => row.notice_id), 10)) { await retryQuery(async () => await admin.from("notice_versions").upsert(part, { onConflict: "notice_id,source_hash" }).select()); }
   // Do not overwrite an already processed attachment with the source's initial
-  // `대기` status on every overlapping 72-hour collection run.
+  // `대기` status on every overlapping daily collection run.
   const attachments = validNotices.flatMap((notice) => notice.attachments.map((attachment) => ({ notice_id: idByKey.get(`${notice.bidNumber}-${notice.order}`), source_url: attachment.sourceUrl ?? `unavailable:${attachment.id}`, name: attachment.name, kind: attachment.kind }))).filter((row) => row.notice_id);
   const savedAttachments: Record<string, any>[] = [];
   for (const part of chunk(attachments, 25)) { if (!part.length) continue; const { data } = await retryQuery(async () => await admin.from("attachments").upsert(part, { onConflict: "notice_id,source_url" }).select("id")); savedAttachments.push(...(data ?? [])); }

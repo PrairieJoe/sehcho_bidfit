@@ -83,7 +83,7 @@ export async function enqueueReadyNoticeAiJobs(options: { publish?: boolean; not
 
   // Register the whole ready set in bounded upsert batches. The former
   // implementation performed two reads and one upsert per notice; with a
-  // 72-hour service window of 1,600+ notices that exhausted Supabase and
+  // A large daily service window can exhaust Supabase and
   // stopped the batch before Gemini was ever called.
   for (let index = 0; index < readyRows.length; index += 50) {
     const part = readyRows.slice(index, index + 50).map((row) => ({ notice_id: row.noticeId, input_hash: row.inputHash, status: "대기" }));

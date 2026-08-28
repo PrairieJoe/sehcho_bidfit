@@ -112,7 +112,6 @@ export interface BatchRun {
 
 export interface BidSource {
   listNotices(windowStart: Date, windowEnd: Date): Promise<BidNotice[]>;
-  countNotices?(windowStart: Date, windowEnd: Date): Promise<number>;
 }
 
 export interface AnalysisEngine {

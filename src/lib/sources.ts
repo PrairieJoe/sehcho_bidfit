@@ -98,18 +98,7 @@ function normalizeItem(item: Record<string, unknown>, businessType: BusinessType
 
 export class NarajangteoBidSource implements BidSource {
   constructor(private readonly configuredKey = runtimeEnv("NARAJANGTEO_SERVICE_KEY")) {}
-  async countNotices(windowStart: Date, windowEnd: Date): Promise<number> {
-    const serviceKey = this.configuredKey?.trim().replace(/%([0-9A-Fa-f]{2})/g, (match) => String.fromCharCode(parseInt(match.slice(1), 16)));
-    if (!serviceKey) throw new Error("NARAJANGTEO_SERVICE_KEY가 설정되지 않았습니다.");
-    const [, endpoint] = LIST_ENDPOINTS[0];
-    const url = new URL(`${BASE_URL}/${endpoint}`);
-    [["serviceKey", serviceKey], ["type", "json"], ["numOfRows", "1"], ["pageNo", "1"], ["inqryDiv", "1"], ["inqryBgnDt", requestDate(windowStart)], ["inqryEndDt", requestDate(windowEnd)]].forEach(([key, entry]) => url.searchParams.set(key, entry));
-    const payload = await fetchApiPage(url, "용역");
-    const header = payload.response?.header;
-    if (header && String(header.resultCode ?? "00") !== "00") throw new Error(`나라장터 용역 API 오류 (${header.resultCode}): ${header.resultMsg ?? "응답 오류"}`);
-    return Number(payload.response?.body?.totalCount ?? 0);
-  }
-  async listNotices(windowStart: Date, windowEnd: Date, allowFallback = true, diagnostics: string[] = []): Promise<BidNotice[]> {
+  async listNotices(windowStart: Date, windowEnd: Date, diagnostics: string[] = []): Promise<BidNotice[]> {
     const serviceKey = this.configuredKey?.trim().replace(/%([0-9A-Fa-f]{2})/g, (match) => String.fromCharCode(parseInt(match.slice(1), 16)));
     if (!serviceKey) throw new Error("NARAJANGTEO_SERVICE_KEY가 설정되지 않았습니다.");
     const notices: BidNotice[] = [];
@@ -133,18 +122,8 @@ export class NarajangteoBidSource implements BidSource {
       if (items.length < PAGE_SIZE || pageNo * PAGE_SIZE >= totalCount) break;
       }
     }));
-    // Keep every unique notice returned by the four business-type queries.
-    // The previous MVP safeguard sliced this combined result to ten records,
-    // which made a valid 72-hour collection appear incomplete.
+    // Keep every unique notice returned by the service query.
     const unique = Array.from(new Map(notices.map((notice) => [notice.id, notice])).values());
-    // Some public-data API partitions lag behind the current date. Keep the daily
-    // 72-hour query first, then widen once so a temporary empty partition does not
-    // appear as a successful zero-result batch.
-    if (allowFallback && !unique.length && windowEnd.getTime() - windowStart.getTime() >= 71 * 3_600_000) {
-      const widened = await this.listNotices(new Date(windowEnd.getTime() - 7 * 86_400_000), windowEnd, false, diagnostics);
-      if (!widened.length) throw new Error(`나라장터 조회 결과가 없습니다. ${diagnostics.join(" / ")}`);
-      return widened;
-    }
     return unique;
   }
 }
