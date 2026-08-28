@@ -21,7 +21,20 @@ export async function runCollectionPass(runStartedAt = new Date()) {
   const source = getBidSource();
   const longWindowStart = new Date(windowEnd.getTime() - 72 * 3_600_000);
   const configuredLimit = Number(process.env.GEMINI_DAILY_NOTICE_LIMIT ?? 100);
-  const longWindowCount = source.countNotices ? await source.countNotices(longWindowStart, windowEnd) : (await source.listNotices(longWindowStart, windowEnd)).length;
+  let longWindowCount: number;
+  if (source.countNotices) {
+    try {
+      longWindowCount = await source.countNotices(longWindowStart, windowEnd);
+    } catch (error) {
+      // A count-only request is an optimization, not a reason to lose the
+      // daily snapshot. If data.go.kr drops that request, continue in the
+      // quota-safe 24-hour mode and let the actual bounded query decide.
+      console.warn(`[Nara] 72시간 건수 조회 실패, 24시간 모드로 전환: ${error instanceof Error ? error.message : "알 수 없는 오류"}`);
+      longWindowCount = Number.POSITIVE_INFINITY;
+    }
+  } else {
+    longWindowCount = (await source.listNotices(longWindowStart, windowEnd)).length;
+  }
   const selectedWindow = chooseAnalysisWindow(longWindowCount, windowEnd, configuredLimit);
   const { windowStart, windowHours, useShortWindow } = selectedWindow;
   const notices = await source.listNotices(windowStart, windowEnd);
