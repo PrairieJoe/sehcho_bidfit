@@ -23,6 +23,22 @@ export async function extractHwpTextWithLibreOffice(hwp: Buffer) {
   }
 }
 
+/** Uses pyhwp's deterministic HWP5 converter when available on the worker. */
+export async function extractHwpTextWithPyhwp(hwp: Buffer) {
+  if (process.env.OCR_ENABLED !== "true" || process.platform !== "linux") return "";
+  const directory = await mkdtemp(join(tmpdir(), "bidfit-pyhwp-"));
+  const input = join(directory, "source.hwp");
+  try {
+    await writeFile(input, hwp);
+    const result = await execFileAsync("python3", ["-m", "hwp5.hwp5txt", input], { timeout: 120_000, maxBuffer: 4 * 1_024 * 1_024 });
+    return result.stdout.trim();
+  } catch {
+    return "";
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
 /**
  * Runs only on the GitHub-hosted Linux worker. Tesseract is a deterministic,
  * local OCR executable; no document content is sent to an AI service here.

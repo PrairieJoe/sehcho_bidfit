@@ -46,7 +46,8 @@ jobs:
       - name: Install traditional OCR tools
         run: |
           sudo apt-get update
-          sudo apt-get install --yes tesseract-ocr tesseract-ocr-kor poppler-utils libreoffice-writer
+          sudo apt-get install --yes tesseract-ocr tesseract-ocr-kor poppler-utils libreoffice-writer python3-pip python3-lxml xsltproc libxml2-utils
+          python3 -m pip install --user --break-system-packages pyhwp || true
       - name: Record scheduler trigger diagnostics
         run: |
           echo "[workflow] event=${{ github.event_name }} run_id=${{ github.run_id }} ref=${{ github.ref_name }}"
