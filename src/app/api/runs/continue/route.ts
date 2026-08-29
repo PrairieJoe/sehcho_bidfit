@@ -38,7 +38,7 @@ export async function POST(request: Request) {
       await admin.from("batch_runs").update({ status: "분석 중", completed_at: null, error_summary: `Gemini 분석 ${analyzed}/${noticeIds.length}건 재개` }).eq("id", active.id);
     }
     const attachmentProcessed = await processPendingAttachmentJobsInline(40, false, undefined, noticeIds, true);
-    const aiProcessed = await processPendingNoticeAiJobsInline(4, undefined, noticeIds, true, String(active.id));
+    const aiProcessed = await processPendingNoticeAiJobsInline(8, undefined, noticeIds, true, String(active.id));
     const [{ count: pendingAttachments, error: attachmentError }, { count: pendingAi, error: aiError }] = await Promise.all([
       admin.from("processing_jobs").select("id,attachments!inner(notice_id)", { count: "exact", head: true }).in("status", ["대기", "처리 중"]).in("attachments.notice_id", noticeIds),
       admin.from("notice_ai_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]).in("notice_id", noticeIds),

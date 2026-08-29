@@ -119,7 +119,10 @@ export async function runDailyBatch() {
     await ensureDefaultTopic();
     const collection = await runCollectionPass(new Date(String(started.started_at)));
     await admin.from("batch_runs").update({ status: "분석 중", discovered: collection.discovered, changed: collection.changed, api_calls: collection.queryCount, window_start: collection.windowStart, window_end: collection.windowEnd, window_hours: collection.windowHours }).eq("id", started.id);
-    const queue = await enqueuePendingAttachmentJobs(40);
+    // A manual browser run may be closed before its continuation loop drains
+    // the work. Publish the whole current queue so durable consumers can keep
+    // processing independently of the browser tab.
+    const queue = await enqueuePendingAttachmentJobs(5_000);
     const carriedScores = await carryForwardUnchangedScores(admin, collection.noticeIds, String(started.id));
     // Scope registration to this collection. Scanning the whole notice table
     // can consume the web request budget and leave current no-attachment
