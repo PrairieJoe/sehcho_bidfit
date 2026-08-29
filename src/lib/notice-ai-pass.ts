@@ -10,6 +10,7 @@ const list = (value: unknown) => Array.isArray(value) ? value.map(String) : [];
 export const NOTICE_AI_QUEUE_TOPIC = "bidfit-notice-ai";
 export type NoticeAiQueueMessage = { aiJobId: string };
 const topicOf = (row: Row): Topic => ({ id: String(row.id), name: String(row.name), description: String(row.description ?? ""), capabilities: String(row.capabilities ?? ""), includeKeywords: list(row.include_keywords), excludeKeywords: list(row.exclude_keywords), businessTypes: list(row.business_types) as Topic["businessTypes"], regions: list(row.regions), minBudget: row.min_budget == null ? null : Number(row.min_budget), maxBudget: row.max_budget == null ? null : Number(row.max_budget), minimumDays: Number(row.minimum_days ?? 0), threshold: Number(row.threshold ?? 70) });
+const isNonRetryableNoticeAiFailure = (reason: unknown) => /quota|429|RESOURCE_EXHAUSTED|rate limit|terminal 실패|첨부문서 추출이 terminal|모든 첨부문서.*(끝나지 않아|완료되지 않아)|Gemini 분석을 건너뛰었습니다/i.test(String(reason ?? ""));
 const noticeOf = (row: Row): BidNotice => ({ id: String(row.id), bidNumber: String(row.bid_number), order: String(row.bid_order), title: String(row.title), businessType: String(row.business_type) as BidNotice["businessType"], status: String(row.status) as BidNotice["status"], agency: String(row.agency), demandAgency: String(row.demand_agency), region: String(row.region), publishedAt: String(row.published_at ?? ""), closesAt: String(row.closes_at ?? ""), budget: row.budget == null ? null : Number(row.budget), budgetLabel: String(row.budget_label), contractMethod: String(row.contract_method), detailUrl: String(row.detail_url), description: String(row.description), tasks: list(row.tasks), qualifications: list(row.qualifications), attachments: (row.attachments ?? []).filter((item: Row) => item.is_current !== false).map((item: Row) => ({ id: String(item.id), name: String(item.name), kind: String(item.kind), status: String(item.status) as BidNotice["attachments"][number]["status"], extractedText: String((Array.isArray(item.attachment_texts) ? item.attachment_texts[0] : item.attachment_texts)?.extracted_text ?? "") || undefined })), reviewState: "검토 전" });
 
 function inputHashOf(analyzerVersion: string, notice: Row, attachments: Row[]) {
@@ -117,7 +118,7 @@ export async function enqueueReadyNoticeAiJobs(options: { publish?: boolean; not
     // run; doing so repeatedly burns the remaining free-tier allowance and
     // obscures the original cause. Other provider failures may be retried.
     const retryIds = matching
-      .filter((job: Row) => job.status === "실패" && !/quota|429|RESOURCE_EXHAUSTED|rate limit/i.test(String(job.failure_reason ?? "")))
+      .filter((job: Row) => job.status === "실패" && !isNonRetryableNoticeAiFailure(job.failure_reason))
       .map((job: Row) => String(job.id));
     const forceIds = matching
       .filter((job: Row) => job.status === "완료" && part.some((row) => row.noticeId === String(job.notice_id) && row.needsAnalysis))
@@ -235,7 +236,7 @@ export async function processPendingNoticeAiJobsInline(limit = 32, createdSince?
         .in("notice_id", noticeIds.slice(index, index + 100));
       if (failedError) throw failedError;
       const retryIds = (failed ?? [])
-        .filter((row: Row) => !String(row.failure_reason ?? "").toLowerCase().includes("quota"))
+        .filter((row: Row) => !isNonRetryableNoticeAiFailure(row.failure_reason))
         .map((row: Row) => String(row.id));
       if (retryIds.length) {
         const { error: retryError } = await admin
