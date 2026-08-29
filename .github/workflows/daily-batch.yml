@@ -5,6 +5,7 @@ on:
     - cron: "15 23 * * *" # 08:15 KST (UTC+9)
     - cron: "35 23 * * *" # 08:35 KST retry slot
     - cron: "55 23 * * *" # 08:55 KST retry slot
+    - cron: "5 0 * * *" # 09:05 KST watchdog slot when the prior schedule was not emitted
   workflow_dispatch:
     inputs:
       force:
@@ -46,6 +47,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes tesseract-ocr tesseract-ocr-kor poppler-utils
+      - name: Record scheduler trigger diagnostics
+        run: |
+          echo "[workflow] event=${{ github.event_name }} run_id=${{ github.run_id }} ref=${{ github.ref_name }}"
+          echo "[workflow] utc=$(date -u --iso-8601=seconds) kst=$(TZ=Asia/Seoul date --iso-8601=seconds)"
       - name: Diagnose Nara API connectivity
         run: |
           echo "[nara-preflight] DNS records"
