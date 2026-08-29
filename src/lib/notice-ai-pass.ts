@@ -67,13 +67,13 @@ export async function enqueueReadyNoticeAiJobs(options: { publish?: boolean; not
     for (let index = 0; index < options.noticeIds.length; index += 100) {
       const { data: part, error } = await admin
         .from("notices")
-        .select("id,title,description,source_hash,attachments(id,status,sha256,attachment_texts(extracted_text))")
+        .select("id,title,description,source_hash,attachments(id,status,sha256,attachment_texts(extracted_text)),topic_scores(analysis)")
         .in("id", options.noticeIds.slice(index, index + 100));
       if (error) throw error;
       data.push(...(part ?? []));
     }
   } else {
-    const { data: part, error } = await admin.from("notices").select("id,title,description,source_hash,attachments(id,status,sha256,attachment_texts(extracted_text))").order("updated_at", { ascending: false }).limit(5_000);
+    const { data: part, error } = await admin.from("notices").select("id,title,description,source_hash,attachments(id,status,sha256,attachment_texts(extracted_text)),topic_scores(analysis)").order("updated_at", { ascending: false }).limit(5_000);
     if (error) throw error;
     data.push(...(part ?? []));
   }
@@ -81,7 +81,14 @@ export async function enqueueReadyNoticeAiJobs(options: { publish?: boolean; not
   const readyRows = (data ?? []).filter((row: Row) => {
     const attachments = Array.isArray(row.attachments) ? row.attachments : [];
     return attachments.length === 0 || attachments.every((item: Row) => item.status === "분석 완료" && String((Array.isArray(item.attachment_texts) ? item.attachment_texts[0] : item.attachment_texts)?.extracted_text ?? "").trim());
-  }).map((row: Row) => ({ noticeId: String(row.id), inputHash: inputHashOf(analyzerVersion, row, Array.isArray(row.attachments) ? row.attachments : []) }));
+  }).map((row: Row) => ({
+    noticeId: String(row.id),
+    inputHash: inputHashOf(analyzerVersion, row, Array.isArray(row.attachments) ? row.attachments : []),
+    needsAnalysis: !(Array.isArray(row.topic_scores) ? row.topic_scores : []).some((score: Row) => {
+      const analysis = score.analysis as Row | null;
+      return String(analysis?.aiModel ?? "").toLowerCase().startsWith("gemini") && String(analysis?.sourceHash ?? "") === String(row.source_hash ?? "");
+    }),
+  }));
   if (!readyRows.length) return { aiQueued: 0 };
 
   // Register the whole ready set in bounded upsert batches. The former
@@ -101,7 +108,7 @@ export async function enqueueReadyNoticeAiJobs(options: { publish?: boolean; not
     const part = readyRows.slice(index, index + 100);
     const { data: jobs, error: jobsError } = await admin.from("notice_ai_jobs").select("id,notice_id,input_hash,status,failure_reason").in("notice_id", part.map((row) => row.noticeId));
     if (jobsError) throw jobsError;
-    const matching = (jobs ?? []).filter((job: Row) => part.some((row) => row.noticeId === String(job.notice_id) && row.inputHash === String(job.input_hash) && job.status !== "완료"));
+    const matching = (jobs ?? []).filter((job: Row) => part.some((row) => row.noticeId === String(job.notice_id) && row.inputHash === String(job.input_hash) && (job.status !== "완료" || row.needsAnalysis)));
     // A quota failure is a durable daily-limit signal, not a transient job
     // failure. Never turn it back into a pending job during the same daily
     // run; doing so repeatedly burns the remaining free-tier allowance and
@@ -109,11 +116,18 @@ export async function enqueueReadyNoticeAiJobs(options: { publish?: boolean; not
     const retryIds = matching
       .filter((job: Row) => job.status === "실패" && !/quota|429|RESOURCE_EXHAUSTED|rate limit/i.test(String(job.failure_reason ?? "")))
       .map((job: Row) => String(job.id));
+    const forceIds = matching
+      .filter((job: Row) => job.status === "완료" && part.some((row) => row.noticeId === String(job.notice_id) && row.needsAnalysis))
+      .map((job: Row) => String(job.id));
     if (retryIds.length) {
       const { error: retryError } = await admin.from("notice_ai_jobs").update({ status: "대기", failure_reason: null, updated_at: new Date().toISOString() }).in("id", retryIds);
       if (retryError) throw retryError;
     }
-    const retrySet = new Set(retryIds);
+    if (forceIds.length) {
+      const { error: forceError } = await admin.from("notice_ai_jobs").update({ status: "대기", failure_reason: null, updated_at: new Date().toISOString() }).in("id", forceIds);
+      if (forceError) throw forceError;
+    }
+    const retrySet = new Set([...retryIds, ...forceIds]);
     const publishable = matching.filter((job: Row) => job.status === "대기" || retrySet.has(String(job.id)));
     if (options.publish ?? true) {
       for (let offset = 0; offset < publishable.length; offset += 8) {
