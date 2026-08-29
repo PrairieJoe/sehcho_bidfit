@@ -157,7 +157,22 @@ export async function processNoticeAiJob(aiJobId: string, batchId?: string) {
     }
     const { data: topics, error: topicError } = await admin.from("topics").select("*").limit(10);
     if (topicError) throw topicError;
-    const activeBatch = batchId ? { id: batchId } : (await admin.from("batch_runs").select("id").in("status", ["실행 중", "분석 중"]).order("started_at", { ascending: false }).limit(1).maybeSingle()).data;
+    const activeBatch = batchId ? (await admin.from("batch_runs").select("id,started_at").eq("id", batchId).maybeSingle()).data : (await admin.from("batch_runs").select("id,started_at").in("status", ["실행 중", "분석 중"]).order("started_at", { ascending: false }).limit(1).maybeSingle()).data;
+    // Once Gemini has rejected one job for the current batch's daily quota,
+    // fail subsequent jobs locally instead of issuing hundreds of identical
+    // HTTP 429 requests from queue consumers and browser continuations.
+    if (activeBatch?.id) {
+      const { data: quotaSignal, error: quotaSignalError } = await admin
+        .from("notice_ai_jobs")
+        .select("id")
+        .eq("status", "실패")
+        .ilike("failure_reason", "%quota%")
+        .gte("updated_at", String(activeBatch.started_at ?? new Date().toISOString()))
+        .limit(1)
+        .maybeSingle();
+      if (quotaSignalError) throw quotaSignalError;
+      if (quotaSignal) throw new GeminiQuotaError(429, "현재 배치에서 무료 플랜 quota 초과가 이미 확인되어 추가 API 호출을 차단했습니다.");
+    }
     for (const topicRow of topics ?? []) {
       const topic = topicOf(topicRow);
       const analysis = { ...await analyzeWithGemini(notice, topic), sourceHash: String(row.source_hash ?? ""), batchId: activeBatch?.id ? String(activeBatch.id) : undefined };
@@ -234,13 +249,10 @@ export async function processPendingNoticeAiJobsInline(limit = 32, createdSince?
   }
   const { data: activeBatch } = await admin.from("batch_runs").select("id").in("status", ["실행 중", "분석 중"]).order("started_at", { ascending: false }).limit(1).maybeSingle();
   let processed = 0;
-  for (let index = 0; index < (data ?? []).length; index += 4) {
-    const group = (data ?? []).slice(index, index + 4);
-    const results = await Promise.all(group.map(async (row) => {
-      try { await processNoticeAiJob(String(row.id), batchId ?? (activeBatch?.id ? String(activeBatch.id) : undefined)); return 1; } catch { return 0; }
-    }));
-    processed += results.reduce<number>((sum, value) => sum + value, 0);
-    console.log(`[Gemini] 진행 ${Math.min(index + group.length, data?.length ?? 0)}/${data?.length ?? 0}`);
+  for (let index = 0; index < (data ?? []).length; index += 1) {
+    const row = (data ?? [])[index];
+    try { await processNoticeAiJob(String(row.id), batchId ?? (activeBatch?.id ? String(activeBatch.id) : undefined)); processed += 1; } catch { /* the job records its durable failure reason */ }
+    console.log(`[Gemini] 진행 ${index + 1}/${data?.length ?? 0}`);
   }
   return processed;
 }
