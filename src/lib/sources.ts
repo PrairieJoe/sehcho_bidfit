@@ -24,12 +24,12 @@ function requestDate(date: Date) {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(date).reduce<Record<string, string>>((memo, part) => ({ ...memo, [part.type]: part.value }), {});
   return `${parts.year}${parts.month}${parts.day}${parts.hour}${parts.minute}`;
 }
-async function fetchApiPage(url: URL, businessType: string) {
+async function fetchApiPage(url: URL, businessType: string, maxAttempts = 5) {
   let lastError: unknown;
   // data.go.kr occasionally drops TLS connections from hosted runners. Use a
   // longer bounded backoff here because the worker is allowed to run for hours
   // and a transient transport failure must not create a false partial batch.
-  for (let attempt = 1; attempt <= 5; attempt += 1) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
       // GitHub-hosted runners intermittently fail during undici's address
       // selection for apis.data.go.kr. Force IPv4 through Node's native HTTPS
@@ -65,8 +65,12 @@ async function fetchApiPage(url: URL, businessType: string) {
         lastError = fallbackError;
         const fallbackDetail = fallbackError instanceof Error ? `${fallbackError.name}: ${fallbackError.message}` : String(fallbackError);
         console.warn(`[Nara] ${businessType} fetch fallback failed: ${fallbackDetail}`);
+        // The e-order endpoint is supplementary. Retrying a 429 for every
+        // notice multiplies the upstream rate-limit violation and delays the
+        // actual collection/analysis run without improving coverage.
+        if (businessType.includes("첨부파일") && /\b429\b/.test(fallbackDetail)) throw fallbackError;
       }
-      if (attempt < 5) await new Promise((resolve) => setTimeout(resolve, 2 ** attempt * 1_000));
+      if (attempt < maxAttempts) await new Promise((resolve) => setTimeout(resolve, 2 ** attempt * 1_000));
     }
   }
   throw lastError instanceof Error ? lastError : new Error(`나라장터 ${businessType} 목록 조회 실패`);
@@ -104,7 +108,7 @@ type EorderAttachment = { eorderAtchFileNm?: unknown; eorderAtchFileUrl?: unknow
 async function fetchEorderAttachments(serviceKey: string, bidNtceNo: string): Promise<EorderAttachment[]> {
   const url = new URL(`${BASE_URL}/getBidPblancListInfoEorderAtchFileInfo`);
   [["serviceKey", serviceKey], ["type", "json"], ["numOfRows", "100"], ["pageNo", "1"], ["inqryDiv", "1"], ["bidNtceNo", bidNtceNo]].forEach(([key, entry]) => url.searchParams.set(key, entry));
-  const payload = await fetchApiPage(url, "용역 첨부파일");
+  const payload = await fetchApiPage(url, "용역 첨부파일", 1);
   const header = payload.response?.header;
   if (header && String(header.resultCode ?? "00") !== "00") {
     // This operation is supplementary. An upstream permission/availability
@@ -152,22 +156,24 @@ async function refreshNoticeAttachments(serviceKey: string, notices: BidNotice[]
 async function enrichEorderAttachments(serviceKey: string, notices: BidNotice[]) {
   // Keep the supplementary calls bounded: the official API is rate-limited,
   // and a slow attachment catalogue must not starve the main list collection.
-  for (let index = 0; index < notices.length; index += 4) {
-    await Promise.all(notices.slice(index, index + 4).map(async (notice) => {
-      try {
-        const extra = await fetchEorderAttachments(serviceKey, notice.bidNumber);
-        const existing = new Set(notice.attachments.map((attachment) => attachment.sourceUrl || `${attachment.name}:${attachment.kind}`));
-        for (const file of extra) {
-          const name = value(file as Record<string, unknown>, "eorderAtchFileNm") || "e발주 첨부파일";
-          const sourceUrl = value(file as Record<string, unknown>, "eorderAtchFileUrl");
-          if (!sourceUrl || existing.has(sourceUrl)) continue;
-          existing.add(sourceUrl);
-          notice.attachments.push({ id: `${notice.id}-eorder-${notice.attachments.length + 1}`, name, kind: name.split("?")[0].split(".").pop()?.toUpperCase() || "FILE", status: "대기", sourceUrl });
-        }
-      } catch (error) {
-        console.warn(`[Nara] e발주 첨부 조회 전송 실패 ${notice.bidNumber}: ${error instanceof Error ? error.message : String(error)}`);
+  // Detail results are authoritative for notices that already expose files.
+  // Query the supplementary catalogue only for empty detail results, one at a
+  // time, so the official per-second quota cannot be exhausted by a burst.
+  for (const notice of notices.filter((item) => item.attachments.length === 0)) {
+    try {
+      const extra = await fetchEorderAttachments(serviceKey, notice.bidNumber);
+      const existing = new Set(notice.attachments.map((attachment) => attachment.sourceUrl || `${attachment.name}:${attachment.kind}`));
+      for (const file of extra) {
+        const name = value(file as Record<string, unknown>, "eorderAtchFileNm") || "e발주 첨부파일";
+        const sourceUrl = value(file as Record<string, unknown>, "eorderAtchFileUrl");
+        if (!sourceUrl || existing.has(sourceUrl)) continue;
+        existing.add(sourceUrl);
+        notice.attachments.push({ id: `${notice.id}-eorder-${notice.attachments.length + 1}`, name, kind: name.split("?")[0].split(".").pop()?.toUpperCase() || "FILE", status: "대기", sourceUrl });
       }
-    }));
+    } catch (error) {
+      console.warn(`[Nara] e발주 첨부 조회 전송 실패 ${notice.bidNumber}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 350));
   }
 }
 function normalizeItem(item: Record<string, unknown>, businessType: BusinessType): BidNotice | null {
