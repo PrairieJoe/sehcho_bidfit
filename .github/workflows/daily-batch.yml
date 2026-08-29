@@ -67,8 +67,18 @@ jobs:
           last_status=1
           for attempt in 1 2 3 4 5; do
             echo "[workflow] batch attempt ${attempt}/5"
-            pnpm batch:daily && exit 0
+            set +e
+            output=$(pnpm batch:daily 2>&1)
             last_status=$?
+            set -e
+            echo "$output"
+            # An upstream 429 is a quota/rate-limit response. Repeating the
+            # same request five times only extends the provider throttle window.
+            if echo "$output" | grep -Eiq '429|RESOURCE_EXHAUSTED|rate limit|quota'; then
+              echo "[workflow] upstream quota/rate-limit detected; stopping retries"
+              exit "$last_status"
+            fi
+            if [ "$last_status" -eq 0 ]; then exit 0; fi
             if [ "$attempt" -lt 5 ]; then
               delay=$((attempt * 30))
               echo "[workflow] batch failed; retrying after ${delay} seconds"
