@@ -26,6 +26,18 @@ function requestDate(date: Date) {
 }
 async function fetchApiPage(url: URL, businessType: string, maxAttempts = 5) {
   let lastError: unknown;
+  const httpFailure = (status: number, body: string, retryAfter?: string) => {
+    let apiDetail = "";
+    try {
+      const parsed = JSON.parse(body) as { response?: { header?: { resultCode?: string | number; resultMsg?: string } } };
+      const header = parsed.response?.header;
+      if (header?.resultCode || header?.resultMsg) apiDetail = ` resultCode=${header.resultCode ?? "?"} resultMsg=${header.resultMsg ?? "?"}`;
+    } catch {
+      // A gateway may return HTML or an empty body. Keep the HTTP status useful.
+    }
+    const retryDetail = retryAfter ? ` retryAfter=${retryAfter}` : "";
+    return new Error(`나라장터 ${businessType} 목록 조회 실패 (${status})${apiDetail}${retryDetail}`);
+  };
   // data.go.kr occasionally drops TLS connections from hosted runners. Use a
   // longer bounded backoff here because the worker is allowed to run for hours
   // and a transient transport failure must not create a false partial batch.
@@ -42,7 +54,7 @@ async function fetchApiPage(url: URL, businessType: string, maxAttempts = 5) {
           response.on("data", (chunk) => { body += chunk; });
           response.on("end", () => {
             const status = response.statusCode ?? 0;
-            if (status < 200 || status >= 300) { reject(new Error(`나라장터 ${businessType} 목록 조회 실패 (${status})`)); return; }
+            if (status < 200 || status >= 300) { reject(httpFailure(status, body, response.headers["retry-after"])); return; }
             try { resolve(JSON.parse(body)); } catch { reject(new Error(`나라장터 ${businessType} JSON 응답 파싱 실패`)); }
           });
         });
@@ -66,7 +78,7 @@ async function fetchApiPage(url: URL, businessType: string, maxAttempts = 5) {
       // second transport before spending the next backoff interval.
       try {
         const response = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(45_000) });
-        if (!response.ok) throw new Error(`나라장터 ${businessType} 목록 조회 실패 (${response.status})`);
+        if (!response.ok) throw httpFailure(response.status, await response.text(), response.headers.get("retry-after") ?? undefined);
         return await response.json() as { response?: { header?: { resultCode?: string | number; resultMsg?: string }; body?: { items?: { item?: Record<string, unknown> | Record<string, unknown>[] } | Record<string, unknown>[]; totalCount?: number } } };
       } catch (fallbackError) {
         lastError = fallbackError;
