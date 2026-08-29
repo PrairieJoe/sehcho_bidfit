@@ -28,7 +28,7 @@ Vercel 프로젝트의 `Settings → Environment Variables`에서 `Production` �
 
 ## Supabase 초기화
 
-1. Supabase SQL Editor에서 `supabase/migrations/202608250001_initial_schema.sql`, `202608250002_admin_only_writes.sql`, `202608250003_public_read_admin_settings.sql`, `202608260001_notice_ai_jobs.sql`, `202608280001_batch_window.sql`을 순서대로 실행합니다.
+1. Supabase SQL Editor에서 `supabase/migrations/202608250001_initial_schema.sql`, `202608250002_admin_only_writes.sql`, `202608250003_public_read_admin_settings.sql`, `202608260001_notice_ai_jobs.sql`, `202608280001_batch_window.sql`, `202608290002_current_attachment_flag.sql`을 순서대로 실행합니다.
 2. 원본 첨부파일은 Storage에 저장하지 않습니다. `bid-documents` 버킷은 이전 설치에서 남아 있어도 사용하지 않습니다.
 3. 배포 후 `/admin`에 접속해 관리자 코드를 입력합니다.
 4. 초기 설정 진단에서 모든 항목이 준비됨으로 표시되면 주제·키워드·점수 기준을 저장합니다.

@@ -30,10 +30,10 @@ export async function requeueAttachmentsMissingText(noticeIds: string[]) {
   for (let index = 0; index < noticeIds.length; index += 100) {
     const { data, error } = await admin
       .from("attachments")
-      .select("id,status,attachment_texts(extracted_text)")
+      .select("id,status,is_current,attachment_texts(extracted_text)")
       .in("notice_id", noticeIds.slice(index, index + 100));
     if (error) throw error;
-    for (const attachment of data ?? []) {
+    for (const attachment of (data ?? []).filter((item: Row) => item.is_current !== false)) {
       const text = Array.isArray((attachment as Row).attachment_texts)
         ? (attachment as Row).attachment_texts[0]?.extracted_text
         : ((attachment as Row).attachment_texts as Row | undefined)?.extracted_text;
@@ -56,7 +56,7 @@ export async function requeueTraditionalOcrCandidates(noticeIds: string[]) {
   const admin = createSupabaseAdminClient();
   const ids: string[] = [];
   for (let index = 0; index < noticeIds.length; index += 100) {
-    const { data, error } = await admin.from("processing_jobs").select("id,attempts,attachments!inner(notice_id,name,status,failure_reason)").in("status", ["완료", "실패"]).in("attachments.notice_id", noticeIds.slice(index, index + 100));
+    const { data, error } = await admin.from("processing_jobs").select("id,attempts,attachments!inner(notice_id,name,status,failure_reason,is_current)").in("status", ["완료", "실패"]).eq("attachments.is_current", true).in("attachments.notice_id", noticeIds.slice(index, index + 100));
     if (error) throw error;
     for (const row of data ?? []) {
       const attachment = Array.isArray((row as Row).attachments) ? (row as Row).attachments[0] : (row as Row).attachments;
@@ -99,8 +99,9 @@ async function recoverPendingAttachmentsWithTerminalJobs() {
   const admin = createSupabaseAdminClient();
   const { data, error } = await admin
     .from("processing_jobs")
-    .select("id, attachments!inner(status,name,failure_reason)")
+    .select("id, attachments!inner(status,name,failure_reason,is_current)")
     .in("status", ["완료", "실패"])
+    .eq("attachments.is_current", true)
     .limit(1_000);
   if (error) throw error;
   const ids = (data ?? []).filter((job: Row) => {
@@ -129,7 +130,7 @@ export async function enqueuePendingAttachmentJobs(limit = 200, publish = true) 
   const staleBefore = new Date(Date.now() - 60_000).toISOString();
   await admin.from("processing_jobs").update({ status: "대기", updated_at: new Date().toISOString() }).eq("status", "처리 중").lt("updated_at", staleBefore);
   const recovered = await recoverPendingAttachmentsWithTerminalJobs();
-  const { data: jobs, error } = await admin.from("processing_jobs").select("id,attempts").in("status", ["대기", "처리 중"]).order("created_at", { ascending: true }).limit(limit);
+  const { data: jobs, error } = await admin.from("processing_jobs").select("id,attempts,attachments!inner(is_current)").eq("attachments.is_current", true).in("status", ["대기", "처리 중"]).order("created_at", { ascending: true }).limit(limit);
   if (error) throw error;
   const rows = jobs ?? [];
   if (publish) {
@@ -146,7 +147,7 @@ export async function processPendingAttachmentJobsInline(limit = 40, publishAiQu
   if (noticeIds?.length) {
     const staleBefore = new Date(Date.now() - 60_000).toISOString();
     for (let index = 0; index < noticeIds.length; index += 100) {
-      let staleQuery = admin.from("processing_jobs").select("id,attachments!inner(notice_id)").eq("status", "처리 중").in("attachments.notice_id", noticeIds.slice(index, index + 100));
+      let staleQuery = admin.from("processing_jobs").select("id,attachments!inner(notice_id,is_current)").eq("attachments.is_current", true).eq("status", "처리 중").in("attachments.notice_id", noticeIds.slice(index, index + 100));
       if (!resetCurrentInFlight) staleQuery = staleQuery.lt("updated_at", staleBefore);
       const { data: stale, error } = await staleQuery;
       if (error) throw error;
@@ -160,7 +161,7 @@ export async function processPendingAttachmentJobsInline(limit = 40, publishAiQu
   let data: Row[] = [];
   if (noticeIds?.length) {
     for (let index = 0; index < noticeIds.length && data.length < limit; index += 100) {
-      let partQuery = admin.from("processing_jobs").select("id,attachments!inner(notice_id)").in("status", resetCurrentInFlight ? ["대기", "처리 중"] : ["대기"]).in("attachments.notice_id", noticeIds.slice(index, index + 100)).order("created_at", { ascending: true }).limit(limit - data.length);
+      let partQuery = admin.from("processing_jobs").select("id,attachments!inner(notice_id,is_current)").eq("attachments.is_current", true).in("status", resetCurrentInFlight ? ["대기", "처리 중"] : ["대기"]).in("attachments.notice_id", noticeIds.slice(index, index + 100)).order("created_at", { ascending: true }).limit(limit - data.length);
       const { data: part, error } = await partQuery;
       if (error) throw error;
       data.push(...(part ?? []));
@@ -234,10 +235,10 @@ export async function finishActiveBatchIfDrained() {
   const admin = createSupabaseAdminClient();
   const { data: active } = await admin.from("batch_runs").select("id,started_at,discovered").eq("status", "분석 중").order("started_at", { ascending: false }).limit(1).maybeSingle();
   if (!active) return;
-  const { count: attachmentCount, error } = await admin.from("processing_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]);
+  const { count: attachmentCount, error } = await admin.from("processing_jobs").select("id,attachments!inner(is_current)", { count: "exact", head: true }).eq("attachments.is_current", true).in("status", ["대기", "처리 중"]);
   const { count: aiCount, error: aiError } = await admin.from("notice_ai_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]);
   // Legacy jobs from prior runs must not block completion of the current run.
-  const { count: currentAttachments } = await admin.from("processing_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]).gte("created_at", active.started_at);
+  const { count: currentAttachments } = await admin.from("processing_jobs").select("id,attachments!inner(is_current)", { count: "exact", head: true }).eq("attachments.is_current", true).in("status", ["대기", "처리 중"]).gte("created_at", active.started_at);
   const { count: currentAi } = await admin.from("notice_ai_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]).gte("created_at", active.started_at);
   if (error || aiError || (currentAttachments ?? 0) > 0 || (currentAi ?? 0) > 0) return;
   const { data: scores } = await admin.from("topic_scores").select("notice_id,analysis").gte("updated_at", active.started_at);
@@ -245,11 +246,11 @@ export async function finishActiveBatchIfDrained() {
   const complete = Number(active.discovered ?? 0) > 0 && analyzed === Number(active.discovered);
   let errorSummary: string | null = null;
   if (!complete) {
-    const { data: notices } = await admin.from("notices").select("attachments(status,failure_reason)").gte("updated_at", active.started_at);
+    const { data: notices } = await admin.from("notices").select("attachments(status,failure_reason,is_current)").gte("updated_at", active.started_at);
     const statusCounts: Record<string, number> = {};
     const reasonCounts: Record<string, number> = {};
     for (const notice of notices ?? []) {
-      for (const attachment of (notice as Row).attachments ?? []) {
+      for (const attachment of ((notice as Row).attachments ?? []).filter((item: Row) => item.is_current !== false)) {
         const status = String(attachment.status ?? "사유 미기록");
         if (status === "분석 완료") continue;
         statusCounts[status] = (statusCounts[status] ?? 0) + 1;

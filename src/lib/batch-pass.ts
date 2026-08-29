@@ -7,9 +7,11 @@ import { createSupabaseAdminClient } from "@/lib/supabase";
 async function countCurrentJobs(admin: any, table: string, noticeIds: string[], statuses: string[], attachmentRelation = false) {
   let total = 0;
   for (let index = 0; index < noticeIds.length; index += 100) {
-    const select = attachmentRelation ? "id,attachments!inner(notice_id)" : "id";
+    const select = attachmentRelation ? "id,attachments!inner(notice_id,is_current)" : "id";
     const column = attachmentRelation ? "attachments.notice_id" : "notice_id";
-    const { count, error } = await admin.from(table).select(select, { count: "exact", head: true }).in(column, noticeIds.slice(index, index + 100)).in("status", statuses);
+    let query = admin.from(table).select(select, { count: "exact", head: true }).in(column, noticeIds.slice(index, index + 100)).in("status", statuses);
+    if (attachmentRelation) query = query.eq("attachments.is_current", true);
+    const { count, error } = await query;
     if (error) throw error;
     total += count ?? 0;
   }
@@ -35,10 +37,10 @@ export async function currentBatchDiagnostics(admin: any, noticeIds: string[], b
   const result: BatchDiagnostics = { geminiAttachment: 0, geminiTitleOnly: 0, attachmentNotReady: 0, attachmentReadyWithoutGemini: 0, noAttachmentWithoutGemini: 0, quotaFailures: 0, attachmentStatusSets: {}, attachmentFailureReasons: {}, aiFailureReasons: {} };
   for (let index = 0; index < noticeIds.length; index += 100) {
     const ids = noticeIds.slice(index, index + 100);
-    const { data, error } = await admin.from("notices").select("id,attachments(status,failure_reason,name),topic_scores(analysis)").in("id", ids);
+    const { data, error } = await admin.from("notices").select("id,attachments(status,failure_reason,name,is_current,attachment_texts(extracted_text)),topic_scores(analysis)").in("id", ids);
     if (error) throw error;
     for (const notice of data ?? []) {
-    const attachments = Array.isArray(notice.attachments) ? notice.attachments : [];
+      const attachments = Array.isArray(notice.attachments) ? notice.attachments.filter((attachment: any) => attachment.is_current !== false) : [];
       const analyses = Array.isArray(notice.topic_scores) ? notice.topic_scores.map((row: any) => row.analysis as Record<string, unknown> | null) : [];
       const analyzed = analyses.some((analysis: Record<string, unknown> | null) => isGeminiAnalysis(analysis) && String(analysis?.batchId ?? "") === batchId);
       if (analyzed) {

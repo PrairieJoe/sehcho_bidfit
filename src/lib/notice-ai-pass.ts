@@ -10,7 +10,7 @@ const list = (value: unknown) => Array.isArray(value) ? value.map(String) : [];
 export const NOTICE_AI_QUEUE_TOPIC = "bidfit-notice-ai";
 export type NoticeAiQueueMessage = { aiJobId: string };
 const topicOf = (row: Row): Topic => ({ id: String(row.id), name: String(row.name), description: String(row.description ?? ""), capabilities: String(row.capabilities ?? ""), includeKeywords: list(row.include_keywords), excludeKeywords: list(row.exclude_keywords), businessTypes: list(row.business_types) as Topic["businessTypes"], regions: list(row.regions), minBudget: row.min_budget == null ? null : Number(row.min_budget), maxBudget: row.max_budget == null ? null : Number(row.max_budget), minimumDays: Number(row.minimum_days ?? 0), threshold: Number(row.threshold ?? 70) });
-const noticeOf = (row: Row): BidNotice => ({ id: String(row.id), bidNumber: String(row.bid_number), order: String(row.bid_order), title: String(row.title), businessType: String(row.business_type) as BidNotice["businessType"], status: String(row.status) as BidNotice["status"], agency: String(row.agency), demandAgency: String(row.demand_agency), region: String(row.region), publishedAt: String(row.published_at ?? ""), closesAt: String(row.closes_at ?? ""), budget: row.budget == null ? null : Number(row.budget), budgetLabel: String(row.budget_label), contractMethod: String(row.contract_method), detailUrl: String(row.detail_url), description: String(row.description), tasks: list(row.tasks), qualifications: list(row.qualifications), attachments: (row.attachments ?? []).map((item: Row) => ({ id: String(item.id), name: String(item.name), kind: String(item.kind), status: String(item.status) as BidNotice["attachments"][number]["status"], extractedText: String((Array.isArray(item.attachment_texts) ? item.attachment_texts[0] : item.attachment_texts)?.extracted_text ?? "") || undefined })), reviewState: "검토 전" });
+const noticeOf = (row: Row): BidNotice => ({ id: String(row.id), bidNumber: String(row.bid_number), order: String(row.bid_order), title: String(row.title), businessType: String(row.business_type) as BidNotice["businessType"], status: String(row.status) as BidNotice["status"], agency: String(row.agency), demandAgency: String(row.demand_agency), region: String(row.region), publishedAt: String(row.published_at ?? ""), closesAt: String(row.closes_at ?? ""), budget: row.budget == null ? null : Number(row.budget), budgetLabel: String(row.budget_label), contractMethod: String(row.contract_method), detailUrl: String(row.detail_url), description: String(row.description), tasks: list(row.tasks), qualifications: list(row.qualifications), attachments: (row.attachments ?? []).filter((item: Row) => item.is_current !== false).map((item: Row) => ({ id: String(item.id), name: String(item.name), kind: String(item.kind), status: String(item.status) as BidNotice["attachments"][number]["status"], extractedText: String((Array.isArray(item.attachment_texts) ? item.attachment_texts[0] : item.attachment_texts)?.extracted_text ?? "") || undefined })), reviewState: "검토 전" });
 
 function inputHashOf(analyzerVersion: string, notice: Row, attachments: Row[]) {
   // Include the collection fingerprint so a completed job from an older
@@ -23,9 +23,9 @@ export async function enqueueNoticeAiWhenReady(noticeId: string, delaySeconds = 
   // A missing key must never silently produce a keyword-based score.
   if (!process.env.GEMINI_API_KEY) return { queued: false, reason: "Gemini API 키가 설정되지 않았습니다." };
   const admin = createSupabaseAdminClient();
-  const { data: attachments, error } = await admin.from("attachments").select("id,status,sha256,attachment_texts(extracted_text)").eq("notice_id", noticeId);
+  const { data: attachments, error } = await admin.from("attachments").select("id,status,sha256,is_current,attachment_texts(extracted_text)").eq("notice_id", noticeId);
   if (error) throw error;
-  const rows = attachments ?? [];
+  const rows = (attachments ?? []).filter((item: Row) => item.is_current !== false);
   const { data: noticeMeta, error: noticeMetaError } = await admin.from("notices").select("title,description,source_hash").eq("id", noticeId).maybeSingle();
   if (noticeMetaError) throw noticeMetaError;
   const completedRows = rows.filter((item: Row) => item.status === "분석 완료");
@@ -67,28 +67,31 @@ export async function enqueueReadyNoticeAiJobs(options: { publish?: boolean; not
     for (let index = 0; index < options.noticeIds.length; index += 100) {
       const { data: part, error } = await admin
         .from("notices")
-        .select("id,title,description,source_hash,attachments(id,status,sha256,attachment_texts(extracted_text)),topic_scores(analysis)")
+        .select("id,title,description,source_hash,attachments(id,status,sha256,is_current,attachment_texts(extracted_text)),topic_scores(analysis)")
         .in("id", options.noticeIds.slice(index, index + 100));
       if (error) throw error;
       data.push(...(part ?? []));
     }
   } else {
-    const { data: part, error } = await admin.from("notices").select("id,title,description,source_hash,attachments(id,status,sha256,attachment_texts(extracted_text)),topic_scores(analysis)").order("updated_at", { ascending: false }).limit(5_000);
+    const { data: part, error } = await admin.from("notices").select("id,title,description,source_hash,attachments(id,status,sha256,is_current,attachment_texts(extracted_text)),topic_scores(analysis)").order("updated_at", { ascending: false }).limit(5_000);
     if (error) throw error;
     data.push(...(part ?? []));
   }
   const analyzerVersion = `gemini:${process.env.GEMINI_MODEL ?? "gemini-3.5-flash-lite"}`;
   const readyRows = (data ?? []).filter((row: Row) => {
-    const attachments = Array.isArray(row.attachments) ? row.attachments : [];
+    const attachments = Array.isArray(row.attachments) ? row.attachments.filter((item: Row) => item.is_current !== false) : [];
     return attachments.length === 0 || attachments.every((item: Row) => item.status === "분석 완료" && String((Array.isArray(item.attachment_texts) ? item.attachment_texts[0] : item.attachment_texts)?.extracted_text ?? "").trim());
-  }).map((row: Row) => ({
+  }).map((row: Row) => {
+    const attachments = Array.isArray(row.attachments) ? row.attachments.filter((item: Row) => item.is_current !== false) : [];
+    return {
     noticeId: String(row.id),
-    inputHash: inputHashOf(analyzerVersion, row, Array.isArray(row.attachments) ? row.attachments : []),
+    inputHash: inputHashOf(analyzerVersion, row, attachments),
     needsAnalysis: !(Array.isArray(row.topic_scores) ? row.topic_scores : []).some((score: Row) => {
       const analysis = score.analysis as Row | null;
       return String(analysis?.aiModel ?? "").toLowerCase().startsWith("gemini") && String(analysis?.sourceHash ?? "") === String(row.source_hash ?? "");
     }),
-  }));
+  };
+  });
   if (!readyRows.length) return { aiQueued: 0 };
 
   // Register the whole ready set in bounded upsert batches. The former

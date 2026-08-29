@@ -45,8 +45,15 @@ export async function runCollectionPass(runStartedAt = new Date()) {
   for (const part of chunk(versions.filter((row) => row.notice_id), 10)) { await retryQuery(async () => await admin.from("notice_versions").upsert(part, { onConflict: "notice_id,source_hash" }).select()); }
   // Do not overwrite an already processed attachment with the source's initial
   // `대기` status on every overlapping daily collection run.
-  const attachments = validNotices.flatMap((notice) => notice.attachments.map((attachment) => ({ notice_id: idByKey.get(`${notice.bidNumber}-${notice.order}`), source_url: attachment.sourceUrl ?? `unavailable:${attachment.id}`, name: attachment.name, kind: attachment.kind }))).filter((row) => row.notice_id);
+  const attachments = validNotices.flatMap((notice) => notice.attachments.map((attachment) => ({ notice_id: idByKey.get(`${notice.bidNumber}-${notice.order}`), source_url: attachment.sourceUrl ?? `unavailable:${attachment.id}`, name: attachment.name, kind: attachment.kind, is_current: true }))).filter((row) => row.notice_id);
   const savedAttachments: Record<string, any>[] = [];
+  // Preserve historical rows but make the detail API's result the current
+  // attachment set for this notice. Current reads filter the soft-disabled
+  // rows, so a stale URL cannot block a fresh analysis.
+  for (const part of chunk(savedRows.map((row) => String(row.id)), 100)) {
+    const { error } = await admin.from("attachments").update({ is_current: false }).in("notice_id", part);
+    if (error) throw error;
+  }
   for (const part of chunk(attachments, 25)) { if (!part.length) continue; const { data } = await retryQuery(async () => await admin.from("attachments").upsert(part, { onConflict: "notice_id,source_url" }).select("id")); savedAttachments.push(...(data ?? [])); }
   // Existing completed jobs must not be reset to "대기" every day. New and stale
   // jobs are published to Vercel Queue by the batch coordinator instead.

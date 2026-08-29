@@ -136,10 +136,11 @@ async function refreshNoticeAttachments(serviceKey: string, notices: BidNotice[]
         const detail = await fetchNoticeDetail(serviceKey, notice.bidNumber);
         if (!detail) return;
         const attachments = attachmentsOf(detail, notice.id);
-        if (attachments.length) {
-          notice.attachments = attachments;
-          refreshed += 1;
-        }
+        // A successful detail response with zero attachments is authoritative
+        // too; retaining the list response here would preserve stale URLs for
+        // documents that G2B no longer publishes.
+        notice.attachments = attachments;
+        refreshed += 1;
       } catch (error) {
         console.warn(`[Nara] 용역 공고 상세 조회 전송 실패 ${notice.bidNumber}: ${error instanceof Error ? error.message : String(error)}`);
       }
