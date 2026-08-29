@@ -5,6 +5,7 @@ import { extractPdfTextWithTraditionalOcr } from "@/lib/traditional-ocr";
 
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 const MAX_EXTRACTED_TEXT_CHARS = 200_000;
+const ATTACHMENT_DOWNLOAD_TIMEOUT_MS = 30_000;
 
 function extensionOf(name: string) { return name.split("?")[0].split(".").pop()?.toLowerCase() ?? ""; }
 function cleanXml(value: string) { return value.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim(); }
@@ -26,7 +27,19 @@ export async function processAttachment(noticeId: string, attachment: Attachment
   if (!attachment.sourceUrl || attachment.sourceUrl.startsWith("unavailable:")) return { ...attachment, status: "보류", failureReason: "나라장터 API가 첨부파일 다운로드 주소를 제공하지 않았습니다." };
   if (!['pdf', 'hwpx', 'hwp', 'docx', 'xlsx', 'pptx'].includes(extension)) return { ...attachment, status: "보류", failureReason: "지원하지 않는 파일 형식입니다. PDF·HWP·HWPX·DOCX·XLSX·PPTX만 처리합니다." };
   try {
-    const response = await fetch(attachment.sourceUrl, { cache: "no-store", redirect: "follow", signal: AbortSignal.timeout(5_000) });
+    let response: Response | undefined;
+    let lastDownloadError: unknown;
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        response = await fetch(attachment.sourceUrl, { cache: "no-store", redirect: "follow", signal: AbortSignal.timeout(ATTACHMENT_DOWNLOAD_TIMEOUT_MS) });
+        if (response.ok || response.status < 500 || attempt === 3) break;
+      } catch (error) {
+        lastDownloadError = error;
+        if (attempt === 3) throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, attempt * 500));
+    }
+    if (!response) throw lastDownloadError instanceof Error ? lastDownloadError : new Error("첨부파일 다운로드 응답이 없습니다.");
     if (!response.ok) return { ...attachment, status: "다운로드 실패", failureReason: `다운로드 HTTP ${response.status}` };
     const declaredSize = Number(response.headers.get("content-length") ?? 0);
     if (declaredSize > MAX_ATTACHMENT_BYTES) return { ...attachment, status: "보류", failureReason: "파일 크기가 10MB 제한을 초과합니다." };
