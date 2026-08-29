@@ -45,7 +45,7 @@ export async function currentBatchDiagnostics(admin: any, noticeIds: string[], b
         if (attachments.length) result.geminiAttachment += 1;
         else result.geminiTitleOnly += 1;
       } else if (!attachments.length) result.noAttachmentWithoutGemini += 1;
-      else if (attachments.every((attachment: any) => String(attachment.status) === "분석 완료")) result.attachmentReadyWithoutGemini += 1;
+      else if (attachments.every((attachment: any) => String(attachment.status) === "분석 완료" && String(attachment.attachment_texts?.[0]?.extracted_text ?? "").trim())) result.attachmentReadyWithoutGemini += 1;
       else {
         result.attachmentNotReady += 1;
         const statusSet = attachments.map((attachment: any) => String(attachment.status)).sort().join(" + ");

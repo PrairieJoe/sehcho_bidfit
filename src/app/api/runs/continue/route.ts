@@ -1,5 +1,5 @@
 import { processPendingAttachmentJobsInline, finishActiveBatchIfDrained } from "@/lib/attachment-pass";
-import { processPendingNoticeAiJobsInline } from "@/lib/notice-ai-pass";
+import { enqueueReadyNoticeAiJobs, processPendingNoticeAiJobsInline } from "@/lib/notice-ai-pass";
 import { requireAdmin } from "@/lib/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase";
 import { currentBatchDiagnostics } from "@/lib/batch-pass";
@@ -38,6 +38,10 @@ export async function POST(request: Request) {
       await admin.from("batch_runs").update({ status: "분석 중", completed_at: null, error_summary: `Gemini 분석 ${analyzed}/${noticeIds.length}건 재개` }).eq("id", active.id);
     }
     const attachmentProcessed = await processPendingAttachmentJobsInline(40, false, undefined, noticeIds, true);
+    // The final attachment in a notice can become text-ready during this
+    // request. Re-scan the current collection before draining AI jobs so that
+    // those notices cannot finish the continuation with no AI job registered.
+    await enqueueReadyNoticeAiJobs({ publish: false, noticeIds });
     const aiProcessed = await processPendingNoticeAiJobsInline(8, undefined, noticeIds, true, String(active.id));
     const [{ count: pendingAttachments, error: attachmentError }, { count: pendingAi, error: aiError }] = await Promise.all([
       admin.from("processing_jobs").select("id,attachments!inner(notice_id)", { count: "exact", head: true }).in("status", ["대기", "처리 중"]).in("attachments.notice_id", noticeIds),
