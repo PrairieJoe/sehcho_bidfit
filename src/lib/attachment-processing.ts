@@ -117,9 +117,9 @@ export async function processAttachment(noticeId: string, attachment: Attachment
     if (!response) throw lastDownloadError instanceof Error ? lastDownloadError : new Error("첨부파일 다운로드 응답이 없습니다.");
     if (!response.ok) return { ...attachment, status: "다운로드 실패", failureReason: `다운로드 HTTP ${response.status}` };
     const declaredSize = Number(response.headers.get("content-length") ?? 0);
-    if (declaredSize > MAX_ATTACHMENT_BYTES) return { ...attachment, status: "보류", failureReason: "파일 크기가 10MB 제한을 초과합니다." };
+    if (declaredSize > MAX_ATTACHMENT_BYTES) return { ...attachment, status: "보류", failureReason: "파일 크기가 25MB 제한을 초과합니다." };
     const bytes = Buffer.from(await response.arrayBuffer());
-    if (bytes.length > MAX_ATTACHMENT_BYTES) return { ...attachment, status: "보류", failureReason: "파일 크기가 10MB 제한을 초과합니다." };
+    if (bytes.length > MAX_ATTACHMENT_BYTES) return { ...attachment, status: "보류", failureReason: "파일 크기가 25MB 제한을 초과합니다." };
     const extracted = extension === "zip" ? await extractZipText(bytes) : await extractBytesText(bytes, extension);
     const text = extracted.text;
     const pages = extracted.pages;
