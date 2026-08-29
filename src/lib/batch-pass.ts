@@ -110,7 +110,7 @@ export async function runDailyBatch() {
     // Recover a run that has made no progress for five minutes so the next
     // scheduled/manual run can resume instead of being blocked for 30 minutes.
     if (age < 5 * 60_000) throw new Error("이미 분석 중인 배치가 있습니다. 현재 작업이 끝난 뒤 다시 실행하세요.");
-    await admin.from("batch_runs").update({ status: "부분 완료", completed_at: new Date().toISOString(), error_summary: "30분 이상 진행되지 않아 정체 배치로 종료했습니다." }).eq("id", active.id);
+    await admin.from("batch_runs").update({ status: "부분 완료", completed_at: new Date().toISOString(), error_summary: "5분 이상 진행되지 않아 정체 배치로 종료했습니다." }).eq("id", active.id);
   }
   await admin.from("batch_runs").update({ completed_at: new Date().toISOString(), status: "부분 완료", error_summary: "다음 일일 작업이 시작되어 이전 분석 대기 작업을 종료했습니다." }).in("status", ["실행 중", "분석 중"]);
   const { data: started, error: startError } = await admin.from("batch_runs").insert({}).select().single();
@@ -121,7 +121,10 @@ export async function runDailyBatch() {
     await admin.from("batch_runs").update({ status: "분석 중", discovered: collection.discovered, changed: collection.changed, api_calls: collection.queryCount, window_start: collection.windowStart, window_end: collection.windowEnd, window_hours: collection.windowHours }).eq("id", started.id);
     const queue = await enqueuePendingAttachmentJobs(40);
     const carriedScores = await carryForwardUnchangedScores(admin, collection.noticeIds, String(started.id));
-    const aiQueue = await enqueueReadyNoticeAiJobs();
+    // Scope registration to this collection. Scanning the whole notice table
+    // can consume the web request budget and leave current no-attachment
+    // notices without a durable Gemini job.
+    const aiQueue = await enqueueReadyNoticeAiJobs({ noticeIds: collection.noticeIds });
     // Web requests should return after collection and durable queue
     // registration. Attachment extraction and Gemini calls continue through
     // /api/runs/continue, avoiding a long initial request that can prevent the
@@ -216,7 +219,8 @@ export async function runGithubActionsBatch() {
     const diagnostics = await currentBatchDiagnostics(admin, collection.noticeIds, String(started.id), String(started.started_at));
     const geminiAnalyzed = diagnostics.geminiAttachment + diagnostics.geminiTitleOnly;
     const complete = drained && !(failedAttachments || failedAi) && geminiAnalyzed === collection.discovered;
-    const errorSummary = complete ? null : `Gemini 분석 ${geminiAnalyzed}/${collection.discovered}건; 미완료 첨부 공고 ${diagnostics.attachmentNotReady}건·첨부 준비 후 Gemini 미실행 ${diagnostics.attachmentReadyWithoutGemini}건·첨부 없음 Gemini 미실행 ${diagnostics.noAttachmentWithoutGemini}건·실패 첨부 ${failedAttachments}건·실패 AI ${failedAi}건`;
+    const top = (values: Record<string, number>) => Object.entries(values).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([reason, count]) => `${reason}(${count})`).join("·") || "없음";
+    const errorSummary = complete ? null : `Gemini 분석 ${geminiAnalyzed}/${collection.discovered}건; 미완료 첨부 공고 ${diagnostics.attachmentNotReady}건·첨부 준비 후 Gemini 미실행 ${diagnostics.attachmentReadyWithoutGemini}건·첨부 없음 Gemini 미실행 ${diagnostics.noAttachmentWithoutGemini}건·quota 실패 ${diagnostics.quotaFailures}건·실패 첨부 ${failedAttachments}건·실패 AI ${failedAi}건; 첨부 상태 ${top(diagnostics.attachmentStatusSets)}; 첨부 사유 ${top(diagnostics.attachmentFailureReasons)}; AI 실패 사유 ${top(diagnostics.aiFailureReasons)}`;
     await admin.from("batch_runs").update({ status: complete ? "완료" : "부분 완료", completed_at: new Date().toISOString(), discovered: collection.discovered, changed: collection.changed, analyzed, api_calls: collection.queryCount, window_start: collection.windowStart, window_end: collection.windowEnd, window_hours: collection.windowHours, error_summary: errorSummary }).eq("id", started.id);
     console.log(`[Batch] diagnostics ${JSON.stringify(diagnostics)}`);
     return { ...collection, attachmentProcessed, aiProcessed, carriedScores, analyzed, complete, drained, diagnostics };
