@@ -20,6 +20,9 @@ importers:
       cfb:
         specifier: ^1.2.2
         version: 1.2.2
+      hwp.js:
+        specifier: 0.0.3
+        version: 0.0.3
       jszip:
         specifier: ^3.10.1
         version: 3.10.1
@@ -1527,6 +1530,9 @@ packages:
   human-signals@2.1.0:
     resolution: {integrity: sha512-B4FFZ6q/T2jhhksgkbEW3HBvWIfDW85snkQgawt07S7J5QXTk6BkNV+0yAeZrM5QpMAdYlocGoljn0sJ/WQkFw==}
     engines: {node: '>=10.17.0'}
+
+  hwp.js@0.0.3:
+    resolution: {integrity: sha512-qVdQjpyfR2rVmfZbbqd/8LAtt8YbwtZ2vm9FkBJj1UGPTP0Zs9+miUDrsPSfARpqkx3L7NeI1qR6hag5DaicyQ==}
 
   iceberg-js@0.8.1:
     resolution: {integrity: sha512-1dhVQZXhcHje7798IVM+xoo/1ZdVfzOMIc8/rgVSijRK38EDqOJoGula9N/8ZI5RD8QTxNQtK/Gozpr+qUqRRA==}
@@ -3801,6 +3807,11 @@ snapshots:
       function-bind: 1.1.2
 
   human-signals@2.1.0: {}
+
+  hwp.js@0.0.3:
+    dependencies:
+      cfb: 1.2.2
+      pako: 1.0.11
 
   iceberg-js@0.8.1: {}
 

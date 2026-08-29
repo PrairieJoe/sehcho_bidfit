@@ -1,5 +1,6 @@
 import { inflateRawSync, inflateSync } from "node:zlib";
 import CFB from "cfb";
+import { parse as parseHwpDocument } from "hwp.js";
 
 type CfbEntry = { name: string; content: Uint8Array };
 
@@ -46,6 +47,20 @@ function previewText(bytes: Buffer) {
     .trim();
 }
 
+function hwpJsText(bytes: Buffer) {
+  try {
+    const document = parseHwpDocument(bytes);
+    return document.sections
+      .flatMap((section) => section.content.map((paragraph) => paragraph.content.map((character) => typeof character.value === "string" ? character.value : "").join("")))
+      .join("\n")
+      .replace(/\u0000/g, "")
+      .replace(/\r?\n{3,}/g, "\n\n")
+      .trim();
+  } catch {
+    return "";
+  }
+}
+
 /** Extracts text from the binary HWP 5 (OLE Compound File) format. */
 export function extractHwpText(input: Buffer): { text: string; pages?: number } {
   const ole = CFB.read(input, { type: "buffer" });
@@ -71,5 +86,6 @@ export function extractHwpText(input: Buffer): { text: string; pages?: number } 
     const preview = entries.find((entry) => /(^|\\)PrvText$/i.test(entry.name));
     if (preview) text = previewText(Buffer.from(preview.content));
   }
+  if (!text) text = hwpJsText(input);
   return { text, pages: ordered.length || undefined };
 }
