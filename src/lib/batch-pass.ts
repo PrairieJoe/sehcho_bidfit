@@ -31,7 +31,7 @@ type BatchDiagnostics = {
   aiFailureReasons: Record<string, number>;
 };
 
-async function currentBatchDiagnostics(admin: any, noticeIds: string[], batchId: string, startedAt: string): Promise<BatchDiagnostics> {
+export async function currentBatchDiagnostics(admin: any, noticeIds: string[], batchId: string, startedAt: string): Promise<BatchDiagnostics> {
   const result: BatchDiagnostics = { geminiAttachment: 0, geminiTitleOnly: 0, attachmentNotReady: 0, attachmentReadyWithoutGemini: 0, noAttachmentWithoutGemini: 0, quotaFailures: 0, attachmentStatusSets: {}, attachmentFailureReasons: {}, aiFailureReasons: {} };
   for (let index = 0; index < noticeIds.length; index += 100) {
     const ids = noticeIds.slice(index, index + 100);

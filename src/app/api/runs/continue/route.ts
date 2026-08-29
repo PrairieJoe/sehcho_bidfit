@@ -2,6 +2,7 @@ import { processPendingAttachmentJobsInline, finishActiveBatchIfDrained } from "
 import { processPendingNoticeAiJobsInline } from "@/lib/notice-ai-pass";
 import { requireAdmin } from "@/lib/auth";
 import { createSupabaseAdminClient } from "@/lib/supabase";
+import { currentBatchDiagnostics } from "@/lib/batch-pass";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
@@ -50,8 +51,10 @@ export async function POST(request: Request) {
       if (scoresError) throw scoresError;
       analyzed = new Set((scores ?? []).filter((row: any) => String(row.analysis?.batchId ?? "") === String(active.id) && String(row.analysis?.aiModel ?? "").toLowerCase().startsWith("gemini")).map((row: any) => String(row.notice_id))).size;
       const complete = analyzed === noticeIds.length;
-      await admin.from("batch_runs").update({ status: complete ? "완료" : "부분 완료", completed_at: new Date().toISOString(), analyzed, error_summary: complete ? null : `Gemini 분석 ${analyzed}/${noticeIds.length}건` }).eq("id", active.id);
-      return Response.json({ done: true, complete, analyzed, expected: noticeIds.length, attachmentProcessed, aiProcessed, pendingAttachments: 0, pendingAi: 0 });
+      const diagnostics = complete ? null : await currentBatchDiagnostics(admin, noticeIds, String(active.id), String(active.started_at));
+      const errorSummary = complete ? null : `Gemini 분석 ${analyzed}/${noticeIds.length}건; 미완료 첨부 공고 ${diagnostics?.attachmentNotReady ?? 0}건·첨부 준비 후 Gemini 미실행 ${diagnostics?.attachmentReadyWithoutGemini ?? 0}건·첨부 없음 Gemini 미실행 ${diagnostics?.noAttachmentWithoutGemini ?? 0}건·quota 실패 ${diagnostics?.quotaFailures ?? 0}건`;
+      await admin.from("batch_runs").update({ status: complete ? "완료" : "부분 완료", completed_at: new Date().toISOString(), analyzed, error_summary: errorSummary }).eq("id", active.id);
+      return Response.json({ done: true, complete, analyzed, expected: noticeIds.length, attachmentProcessed, aiProcessed, pendingAttachments: 0, pendingAi: 0, diagnostics });
     }
     return Response.json({ done: false, attachmentProcessed, aiProcessed, pendingAttachments: pendingAttachments ?? 0, pendingAi: pendingAi ?? 0 });
   } catch (error) {
