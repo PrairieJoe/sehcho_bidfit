@@ -106,7 +106,7 @@ async function recoverPendingAttachmentsWithTerminalJobs() {
 }
 
 /** Publishes one durable queue message per unprocessed attachment. */
-export async function enqueuePendingAttachmentJobs(limit = 200) {
+export async function enqueuePendingAttachmentJobs(limit = 200, publish = true) {
   const admin = createSupabaseAdminClient();
   const staleBefore = new Date(Date.now() - 60_000).toISOString();
   await admin.from("processing_jobs").update({ status: "대기", updated_at: new Date().toISOString() }).eq("status", "처리 중").lt("updated_at", staleBefore);
@@ -114,8 +114,10 @@ export async function enqueuePendingAttachmentJobs(limit = 200) {
   const { data: jobs, error } = await admin.from("processing_jobs").select("id,attempts").in("status", ["대기", "처리 중"]).order("created_at", { ascending: true }).limit(limit);
   if (error) throw error;
   const rows = jobs ?? [];
-  for (let index = 0; index < rows.length; index += 25) {
-    await Promise.all(rows.slice(index, index + 25).map((job: Row) => attachmentQueue.send<AttachmentQueueMessage>(ATTACHMENT_QUEUE_TOPIC, { jobId: String(job.id) }, { idempotencyKey: `extractor-v2:${String(job.id)}:${Number(job.attempts ?? 0)}`, retentionSeconds: 86_400 })));
+  if (publish) {
+    for (let index = 0; index < rows.length; index += 25) {
+      await Promise.all(rows.slice(index, index + 25).map((job: Row) => attachmentQueue.send<AttachmentQueueMessage>(ATTACHMENT_QUEUE_TOPIC, { jobId: String(job.id) }, { idempotencyKey: `extractor-v2:${String(job.id)}:${Number(job.attempts ?? 0)}`, retentionSeconds: 86_400 })));
+    }
   }
   return { attachmentQueued: rows.length, recovered };
 }

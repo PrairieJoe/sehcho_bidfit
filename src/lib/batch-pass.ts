@@ -125,13 +125,15 @@ export async function runDailyBatch() {
     // A manual browser run may be closed before its continuation loop drains
     // the work. Publish the whole current queue so durable consumers can keep
     // processing independently of the browser tab.
-    const queue = await enqueuePendingAttachmentJobs(5_000);
+    // The browser continuation is the single worker for a manual run. Do not
+    // publish competing Queue consumers that can race Gemini/quota handling.
+    const queue = await enqueuePendingAttachmentJobs(5_000, false);
     const missingTextRequeued = await requeueAttachmentsMissingText(collection.noticeIds);
     const carriedScores = await carryForwardUnchangedScores(admin, collection.noticeIds, String(started.id));
     // Scope registration to this collection. Scanning the whole notice table
     // can consume the web request budget and leave current no-attachment
     // notices without a durable Gemini job.
-    const aiQueue = await enqueueReadyNoticeAiJobs({ noticeIds: collection.noticeIds });
+    const aiQueue = await enqueueReadyNoticeAiJobs({ publish: false, noticeIds: collection.noticeIds });
     // Web requests should return after collection and durable queue
     // registration. Attachment extraction and Gemini calls continue through
     // /api/runs/continue, avoiding a long initial request that can prevent the
