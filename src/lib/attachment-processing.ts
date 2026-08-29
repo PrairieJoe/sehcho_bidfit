@@ -60,9 +60,14 @@ async function extractBytesText(bytes: Buffer, extension: string): Promise<{ tex
   let text = "";
   let pages: number | undefined;
   if (extension === "hwp") {
-    const parsed = extractHwpText(bytes);
-    text = parsed.text;
-    pages = parsed.pages;
+    try {
+      const parsed = extractHwpText(bytes);
+      text = parsed.text;
+      pages = parsed.pages;
+    } catch {
+      // A mislabeled or producer-specific HWP must still reach the worker
+      // converters below instead of aborting the whole extraction chain.
+    }
     if (!text.trim()) text = await extractHwpTextWithPyhwp(bytes);
     if (!text.trim()) text = await extractHwpTextWithLibreOffice(bytes);
     if (!text.trim()) text = await extractHwpTextWithLibreOfficeOcr(bytes);
@@ -77,10 +82,17 @@ async function extractBytesText(bytes: Buffer, extension: string): Promise<{ tex
   } else if (extension === "xlsb") {
     text = extractXlsbText(bytes);
   } else if (extension === "hwpx") {
-    const archive = await JSZip.loadAsync(bytes);
-    const sections = Object.values(archive.files).filter((file) => /(^|\/)Contents\/section\d+\.xml$/i.test(file.name));
-    text = (await Promise.all(sections.map((file) => file.async("string")))).map(cleanXml).join("\n");
-    pages = sections.length || undefined;
+    try {
+      const archive = await JSZip.loadAsync(bytes);
+      const sections = Object.values(archive.files).filter((file) => /(^|\/)Contents\/section\d+\.xml$/i.test(file.name));
+      text = (await Promise.all(sections.map((file) => file.async("string")))).map(cleanXml).join("\n");
+      pages = sections.length || undefined;
+    } catch {
+      // Some servers return a mislabeled HWP/XML response. Let the local
+      // LibreOffice fallbacks decide whether it is still a readable document.
+    }
+    if (!text.trim()) text = await extractHwpTextWithLibreOffice(bytes);
+    if (!text.trim()) text = await extractHwpTextWithLibreOfficeOcr(bytes);
   } else {
     const extracted = await extractOfficeText(bytes, extension);
     text = extracted.text;
