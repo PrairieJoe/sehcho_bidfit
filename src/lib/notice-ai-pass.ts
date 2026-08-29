@@ -153,6 +153,10 @@ export async function processNoticeAiJob(aiJobId: string, batchId?: string) {
     if (noticeError) throw noticeError;
     const notice = noticeOf(row);
     if (notice.attachments.length && !notice.attachments.every((item) => item.status === "분석 완료" && item.extractedText?.trim())) {
+      const hasInFlightAttachment = notice.attachments.some((item) => item.status === "대기" || item.status === "처리 중");
+      if (!hasInFlightAttachment) {
+        throw new Error("첨부문서 추출이 terminal 실패하여 Gemini 분석을 진행할 수 없습니다.");
+      }
       // Attachment and AI consumers can observe the same notice concurrently.
       // Not-ready is a defer condition, not an AI failure: leave the durable
       // job pending so the attachment worker/continuation can enqueue it again
