@@ -14,6 +14,12 @@ const SUPPORTED_DOCUMENTS = ['pdf', 'hwpx', 'hwp', 'docx', 'xlsx', 'xls', 'xlsb'
 
 function extensionOf(name: string) { return name.split("?")[0].split(".").pop()?.toLowerCase() ?? ""; }
 function cleanXml(value: string) { return value.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim(); }
+function cleanXmlEntities(value: string) {
+  return value
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
+    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'");
+}
 function looksLikeDocument(bytes: Buffer, extension: string) {
   const head = bytes.subarray(0, 8).toString("hex").toLowerCase();
   if (["hwp", "xls"].includes(extension)) return head.startsWith("d0cf11e0a1b11ae1");
@@ -140,7 +146,8 @@ async function extractBytesText(bytes: Buffer, extension: string): Promise<{ tex
     try {
       const archive = await JSZip.loadAsync(bytes);
       const sections = Object.values(archive.files).filter((file) => /(^|\/)Contents\/section\d+\.xml$/i.test(file.name));
-      text = (await Promise.all(sections.map((file) => file.async("string")))).map(cleanXml).join("\n");
+      const xmlFiles = sections.length ? sections : Object.values(archive.files).filter((file) => /\.xml$/i.test(file.name) && !file.dir);
+      text = (await Promise.all(xmlFiles.map((file) => file.async("string")))).map((xml) => cleanXml(cleanXmlEntities(xml))).filter(Boolean).join("\n");
       pages = sections.length || undefined;
     } catch {
       // Some servers return a mislabeled HWP/XML response. Let the local
