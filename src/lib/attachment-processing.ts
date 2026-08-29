@@ -9,7 +9,7 @@ const MAX_EXTRACTED_TEXT_CHARS = 200_000;
 const ATTACHMENT_DOWNLOAD_TIMEOUT_MS = 30_000;
 const MAX_ARCHIVE_ENTRIES = 30;
 const MAX_ARCHIVE_BYTES = 50 * 1024 * 1024;
-const SUPPORTED_DOCUMENTS = ['pdf', 'hwpx', 'hwp', 'docx', 'xlsx', 'xls', 'xlsm', 'pptx'];
+const SUPPORTED_DOCUMENTS = ['pdf', 'hwpx', 'hwp', 'docx', 'xlsx', 'xls', 'xlsb', 'xlsm', 'pptx'];
 
 function extensionOf(name: string) { return name.split("?")[0].split(".").pop()?.toLowerCase() ?? ""; }
 function cleanXml(value: string) { return value.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim(); }
@@ -63,7 +63,7 @@ async function extractBytesText(bytes: Buffer, extension: string): Promise<{ tex
     text = parsed.text;
     pages = parsed.numpages;
     if (!text.trim()) text = await extractPdfTextWithTraditionalOcr(bytes);
-  } else if (extension === "xls") {
+  } else if (extension === "xls" || extension === "xlsb") {
     text = extractLegacyXlsText(bytes);
   } else if (extension === "hwpx") {
     const archive = await JSZip.loadAsync(bytes);
