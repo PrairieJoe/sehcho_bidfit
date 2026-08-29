@@ -120,10 +120,11 @@ export async function runDailyBatch() {
     const collection = await runCollectionPass(new Date(String(started.started_at)));
     await admin.from("batch_runs").update({ status: "분석 중", discovered: collection.discovered, changed: collection.changed, api_calls: collection.queryCount, window_start: collection.windowStart, window_end: collection.windowEnd, window_hours: collection.windowHours }).eq("id", started.id);
     const queue = await enqueuePendingAttachmentJobs(40);
+    const carriedScores = await carryForwardUnchangedScores(admin, collection.noticeIds, String(started.id));
     const inlineProcessed = await processPendingAttachmentJobsInline(16);
     const aiQueue = await enqueueReadyNoticeAiJobs();
     const inlineAiProcessed = await processPendingNoticeAiJobsInline(8, undefined, undefined, false, String(started.id));
-    const result = { ...collection, ...queue, ...aiQueue, inlineProcessed, inlineAiProcessed, analyzed: inlineAiProcessed };
+    const result = { ...collection, ...queue, ...aiQueue, carriedScores, inlineProcessed, inlineAiProcessed, analyzed: carriedScores + inlineAiProcessed };
     const { error: finishError } = await admin.from("batch_runs").update({
       // Queue registration is not analysis completion. The worker/continuation
       // must verify one Gemini score per collected notice before closing it.
