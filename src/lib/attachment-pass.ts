@@ -71,11 +71,15 @@ export async function requeueTraditionalOcrCandidates(noticeIds: string[]) {
       const newlySupportedZip = name.endsWith(".zip") && /지원하지 않는 파일 형식|ZIP|PDF·HWP·HWPX만 현재 처리합니다|10MB 제한|25MB 제한/.test(reason);
       const legacySupportedExtraction = /\.(pdf|hwpx|hwp|docx|xlsx|xls|xlsb|xlsm|pptx)$/.test(name) && /텍스트를 추출하지 못했습니다/.test(reason);
       const hwpBundleFailure = name.endsWith(".hwp") && /Cannot find module ['\"]cfb['\"]/.test(reason);
+      // The current downloader now retries official G2B fileType variants,
+      // but jobs that previously ended on a parser signature/ZIP error were
+      // terminal and therefore never reached that new code path.
+      const invalidG2bDocumentResponse = /\.(hwp|hwpx)$/.test(name) && /Header Signature|end of central directory|not a zip file|이 아닌 응답|다운로드 HTTP 422/i.test(reason);
       const transientFailure = /operation was aborted due to timeout|Command failed: (tesseract|pdftoppm)/i.test(reason);
       // ZIP support was added after some jobs exhausted the old retry budget.
       // Give only this newly supported format one bounded recovery pass.
-      if (attempts >= 10 && !(newlySupportedZip || newlySupportedOffice)) continue;
-      if (scanPdf || newlySupportedOffice || newlySupportedZip || legacySupportedExtraction || hwpBundleFailure || transientFailure) ids.push(String((row as Row).id));
+      if (attempts >= 10 && !(newlySupportedZip || newlySupportedOffice || invalidG2bDocumentResponse)) continue;
+      if (scanPdf || newlySupportedOffice || newlySupportedZip || legacySupportedExtraction || hwpBundleFailure || invalidG2bDocumentResponse || transientFailure) ids.push(String((row as Row).id));
     }
   }
   for (let index = 0; index < ids.length; index += 100) {
