@@ -75,11 +75,12 @@ export async function requeueTraditionalOcrCandidates(noticeIds: string[]) {
       // but jobs that previously ended on a parser signature/ZIP error were
       // terminal and therefore never reached that new code path.
       const invalidG2bDocumentResponse = /\.(hwp|hwpx)$/.test(name) && /Header Signature|end of central directory|not a zip file|이 아닌 응답|다운로드 HTTP 422/i.test(reason);
+      const sniffableBackupDocument = /\.(bak|bin|dat)$/.test(name) && /지원하지 않는 파일 형식/.test(reason);
       const transientFailure = /operation was aborted due to timeout|Command failed: (tesseract|pdftoppm)/i.test(reason);
       // ZIP support was added after some jobs exhausted the old retry budget.
       // Give only this newly supported format one bounded recovery pass.
-      if (attempts >= 10 && !(newlySupportedZip || newlySupportedOffice || invalidG2bDocumentResponse)) continue;
-      if (scanPdf || newlySupportedOffice || newlySupportedZip || legacySupportedExtraction || hwpBundleFailure || invalidG2bDocumentResponse || transientFailure) ids.push(String((row as Row).id));
+      if (attempts >= 10 && !(newlySupportedZip || newlySupportedOffice || invalidG2bDocumentResponse || sniffableBackupDocument)) continue;
+      if (scanPdf || newlySupportedOffice || newlySupportedZip || legacySupportedExtraction || hwpBundleFailure || invalidG2bDocumentResponse || sniffableBackupDocument || transientFailure) ids.push(String((row as Row).id));
     }
   }
   for (let index = 0; index < ids.length; index += 100) {
