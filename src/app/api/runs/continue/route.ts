@@ -15,8 +15,8 @@ export async function POST(request: Request) {
     await requireAdmin();
     const admin = createSupabaseAdminClient();
     const input = await request.json().catch(() => ({})) as { batchId?: string; noticeIds?: string[] };
-    const activeQuery = admin.from("batch_runs").select("id,started_at").eq("status", "분석 중").order("started_at", { ascending: false }).limit(1);
-    const { data: active, error: activeError } = input.batchId ? await admin.from("batch_runs").select("id,started_at").eq("id", input.batchId).maybeSingle() : await activeQuery.maybeSingle();
+    const activeQuery = admin.from("batch_runs").select("id,started_at,status").eq("status", "분석 중").order("started_at", { ascending: false }).limit(1);
+    const { data: active, error: activeError } = input.batchId ? await admin.from("batch_runs").select("id,started_at,status").eq("id", input.batchId).maybeSingle() : await activeQuery.maybeSingle();
     if (activeError) throw activeError;
     if (!active) return Response.json({ done: true, attachmentProcessed: 0, aiProcessed: 0, pendingAttachments: 0, pendingAi: 0 });
     // Collection upserts touch notice.updated_at. Use that timestamp as the
@@ -29,6 +29,13 @@ export async function POST(request: Request) {
       noticeIds = (notices ?? []).map((notice: any) => String(notice.id));
     }
     if (!noticeIds.length) return Response.json({ done: true, attachmentProcessed: 0, aiProcessed: 0, pendingAttachments: 0, pendingAi: 0 });
+    if (String(active.status) === "완료") {
+      const { data: scores, error: scoresError } = await admin.from("topic_scores").select("notice_id,analysis").in("notice_id", noticeIds);
+      if (scoresError) throw scoresError;
+      const analyzed = new Set((scores ?? []).filter((row: any) => String(row.analysis?.batchId ?? "") === String(active.id) && String(row.analysis?.aiModel ?? "").toLowerCase().startsWith("gemini")).map((row: any) => String(row.notice_id))).size;
+      if (analyzed === noticeIds.length) return Response.json({ done: true, complete: true, analyzed, expected: noticeIds.length, attachmentProcessed: 0, aiProcessed: 0, pendingAttachments: 0, pendingAi: 0 });
+      await admin.from("batch_runs").update({ status: "분석 중", completed_at: null, error_summary: `Gemini 분석 ${analyzed}/${noticeIds.length}건 재개` }).eq("id", active.id);
+    }
     const attachmentProcessed = await processPendingAttachmentJobsInline(40, false, undefined, noticeIds, true);
     const aiProcessed = await processPendingNoticeAiJobsInline(4, undefined, noticeIds, true, String(active.id));
     const [{ count: pendingAttachments, error: attachmentError }, { count: pendingAi, error: aiError }] = await Promise.all([

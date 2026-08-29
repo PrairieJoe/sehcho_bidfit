@@ -176,7 +176,7 @@ export async function processQueuedAttachmentJob(jobId: string, options: { publi
 
 export async function finishActiveBatchIfDrained() {
   const admin = createSupabaseAdminClient();
-  const { data: active } = await admin.from("batch_runs").select("id,started_at").eq("status", "분석 중").order("started_at", { ascending: false }).limit(1).maybeSingle();
+  const { data: active } = await admin.from("batch_runs").select("id,started_at,discovered").eq("status", "분석 중").order("started_at", { ascending: false }).limit(1).maybeSingle();
   if (!active) return;
   const { count: attachmentCount, error } = await admin.from("processing_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]);
   const { count: aiCount, error: aiError } = await admin.from("notice_ai_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]);
@@ -184,6 +184,8 @@ export async function finishActiveBatchIfDrained() {
   const { count: currentAttachments } = await admin.from("processing_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]).gte("created_at", active.started_at);
   const { count: currentAi } = await admin.from("notice_ai_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]).gte("created_at", active.started_at);
   if (error || aiError || (currentAttachments ?? 0) > 0 || (currentAi ?? 0) > 0) return;
-  const { count: analyzed } = await admin.from("topic_scores").select("id", { count: "exact", head: true }).gte("updated_at", active.started_at);
-  await admin.from("batch_runs").update({ status: "완료", completed_at: new Date().toISOString(), analyzed: analyzed ?? 0, error_summary: null }).eq("id", active.id);
+  const { data: scores } = await admin.from("topic_scores").select("notice_id,analysis").gte("updated_at", active.started_at);
+  const analyzed = new Set((scores ?? []).filter((row: any) => String(row.analysis?.batchId ?? "") === String(active.id) && String(row.analysis?.aiModel ?? "").toLowerCase().startsWith("gemini")).map((row: any) => String(row.notice_id))).size;
+  const complete = Number(active.discovered ?? 0) > 0 && analyzed === Number(active.discovered);
+  await admin.from("batch_runs").update({ status: complete ? "완료" : "부분 완료", completed_at: new Date().toISOString(), analyzed, error_summary: complete ? null : `Gemini 분석 ${analyzed}/${Number(active.discovered ?? 0)}건` }).eq("id", active.id);
 }
