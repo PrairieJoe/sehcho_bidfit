@@ -18,6 +18,23 @@ function textRecords(bytes: Buffer) {
   return chunks.join("\n").replace(/\u0000/g, "").replace(/\r?\n{3,}/g, "\n\n").trim();
 }
 
+// A few HWP producers emit valid BodyText streams with non-standard record
+// headers. Recover contiguous Korean/ASCII UTF-16 runs as a deterministic
+// fallback when the normal tag-67 parser cannot see those records.
+function utf16Runs(bytes: Buffer) {
+  const runs: string[] = [];
+  let run = "";
+  const flush = () => { if (run.replace(/[^\uac00-\ud7a3A-Za-z0-9]/g, "").length >= 4) runs.push(run.trim()); run = ""; };
+  for (let offset = 0; offset + 2 <= bytes.length; offset += 2) {
+    const code = bytes.readUInt16LE(offset);
+    const keep = (code >= 0xac00 && code <= 0xd7a3) || (code >= 0x20 && code <= 0x7e) || "，。·：；？！()[]{}-_/\\,.".includes(String.fromCharCode(code));
+    if (keep) run += String.fromCharCode(code);
+    else flush();
+  }
+  flush();
+  return runs.join("\n").replace(/\s+/g, " ").trim();
+}
+
 /** Extracts text from the binary HWP 5 (OLE Compound File) format. */
 export function extractHwpText(input: Buffer): { text: string; pages?: number } {
   const ole = CFB.read(input, { type: "buffer" });
@@ -35,7 +52,7 @@ export function extractHwpText(input: Buffer): { text: string; pages?: number } 
         try { candidates.push(inflate(original)); } catch { /* try the next container format */ }
       }
     }
-    const best = candidates.map(textRecords).sort((a, b) => b.length - a.length)[0];
+    const best = candidates.flatMap((candidate) => [textRecords(candidate), utf16Runs(candidate)]).sort((a, b) => b.length - a.length)[0];
     if (best) chunks.push(best);
   }
   return { text: chunks.join("\n").replace(/\u0000/g, "").replace(/\r?\n{3,}/g, "\n\n").trim(), pages: ordered.length || undefined };
