@@ -120,10 +120,18 @@ async function extractBytesText(bytes: Buffer, extension: string): Promise<{ tex
     if (!text.trim()) text = await extractHwpTextWithLibreOfficeOcr(bytes);
   } else if (extension === "pdf") {
     const parser = (await import("pdf-parse")).default;
-    const parsed = await parser(bytes);
-    text = parsed.text;
-    pages = parsed.numpages;
-    if (!text.trim()) text = await extractPdfTextWithTraditionalOcr(bytes);
+    try {
+      const parsed = await parser(bytes);
+      text = parsed.text;
+      pages = parsed.numpages;
+    } catch {
+      // A damaged/scanner-produced PDF may still render successfully. Do not
+      // stop at pdf-parse's structural error; let the traditional OCR path
+      // make the final determination without using another AI model.
+    }
+    if (!text.trim()) {
+      try { text = await extractPdfTextWithTraditionalOcr(bytes); } catch { /* recorded as extraction failure below */ }
+    }
   } else if (extension === "xls") {
     text = extractLegacyXlsText(bytes);
   } else if (extension === "xlsb") {
