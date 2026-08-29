@@ -35,6 +35,17 @@ function utf16Runs(bytes: Buffer) {
   return runs.join("\n").replace(/\s+/g, " ").trim();
 }
 
+function previewText(bytes: Buffer) {
+  // HWP5 commonly stores a UTF-16LE preview in PrvText. It is not a full
+  // document dump, but remains attachment-derived text and is preferable to
+  // silently downgrading an attached notice to title-only analysis.
+  return bytes.toString("utf16le")
+    .replace(/^\uFEFF/, "")
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /** Extracts text from the binary HWP 5 (OLE Compound File) format. */
 export function extractHwpText(input: Buffer): { text: string; pages?: number } {
   const ole = CFB.read(input, { type: "buffer" });
@@ -55,5 +66,10 @@ export function extractHwpText(input: Buffer): { text: string; pages?: number } 
     const best = candidates.flatMap((candidate) => [textRecords(candidate), utf16Runs(candidate)]).sort((a, b) => b.length - a.length)[0];
     if (best) chunks.push(best);
   }
-  return { text: chunks.join("\n").replace(/\u0000/g, "").replace(/\r?\n{3,}/g, "\n\n").trim(), pages: ordered.length || undefined };
+  let text = chunks.join("\n").replace(/\u0000/g, "").replace(/\r?\n{3,}/g, "\n\n").trim();
+  if (!text) {
+    const preview = entries.find((entry) => /(^|\\)PrvText$/i.test(entry.name));
+    if (preview) text = previewText(Buffer.from(preview.content));
+  }
+  return { text, pages: ordered.length || undefined };
 }
