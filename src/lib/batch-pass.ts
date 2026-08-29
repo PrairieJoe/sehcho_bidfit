@@ -129,6 +129,7 @@ export async function runDailyBatch() {
     // publish competing Queue consumers that can race Gemini/quota handling.
     const queue = await enqueuePendingAttachmentJobs(5_000, false);
     const missingTextRequeued = await requeueAttachmentsMissingText(collection.noticeIds);
+    const improvedExtractionRequeued = await requeueTraditionalOcrCandidates(collection.noticeIds);
     const carriedScores = await carryForwardUnchangedScores(admin, collection.noticeIds, String(started.id));
     // Scope registration to this collection. Scanning the whole notice table
     // can consume the web request budget and leave current no-attachment
@@ -138,7 +139,7 @@ export async function runDailyBatch() {
     // registration. Attachment extraction and Gemini calls continue through
     // /api/runs/continue, avoiding a long initial request that can prevent the
     // admin page from starting its continuation loop.
-    const result = { ...collection, ...queue, ...aiQueue, missingTextRequeued, carriedScores, inlineProcessed: 0, inlineAiProcessed: 0, analyzed: carriedScores };
+    const result = { ...collection, ...queue, ...aiQueue, missingTextRequeued, improvedExtractionRequeued, carriedScores, inlineProcessed: 0, inlineAiProcessed: 0, analyzed: carriedScores };
     const { error: finishError } = await admin.from("batch_runs").update({
       // Queue registration is not analysis completion. The worker/continuation
       // must verify one Gemini score per collected notice before closing it.
