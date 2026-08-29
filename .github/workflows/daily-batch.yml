@@ -2,10 +2,8 @@ name: BidFit daily collection and analysis
 
 on:
   schedule:
-    - cron: "15 23 * * *" # 08:15 KST (UTC+9)
-    - cron: "35 23 * * *" # 08:35 KST retry slot
-    - cron: "55 23 * * *" # 08:55 KST retry slot
-    - cron: "5 0 * * *" # 09:05 KST watchdog slot when the prior schedule was not emitted
+    - cron: "5 23 * * *" # 08:05 KST (UTC+9), inside the Nara API window
+    - cron: "25 23 * * *" # 08:25 KST final watchdog before the API cutoff
   workflow_dispatch:
     inputs:
       force:
