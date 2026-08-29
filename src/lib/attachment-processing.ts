@@ -1,5 +1,6 @@
 import JSZip from "jszip";
 import CFB from "cfb";
+import * as XLSX from "xlsx";
 import type { Attachment } from "@/lib/types";
 import { extractHwpText } from "@/lib/hwp-text";
 import { extractHwpTextWithLibreOffice, extractHwpTextWithLibreOfficeOcr, extractHwpTextWithPyhwp, extractPdfTextWithTraditionalOcr } from "@/lib/traditional-ocr";
@@ -47,6 +48,14 @@ function extractLegacyXlsText(bytes: Buffer) {
   return [...new Set(chunks)].join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+function extractXlsbText(bytes: Buffer) {
+  const workbook = XLSX.read(bytes, { type: "buffer", cellDates: false });
+  return workbook.SheetNames.map((name) => {
+    const sheet = workbook.Sheets[name];
+    return `[${name}]\n${XLSX.utils.sheet_to_csv(sheet, { blankrows: false })}`;
+  }).join("\n\n").trim();
+}
+
 async function extractBytesText(bytes: Buffer, extension: string): Promise<{ text: string; pages?: number }> {
   let text = "";
   let pages: number | undefined;
@@ -63,8 +72,10 @@ async function extractBytesText(bytes: Buffer, extension: string): Promise<{ tex
     text = parsed.text;
     pages = parsed.numpages;
     if (!text.trim()) text = await extractPdfTextWithTraditionalOcr(bytes);
-  } else if (extension === "xls" || extension === "xlsb") {
+  } else if (extension === "xls") {
     text = extractLegacyXlsText(bytes);
+  } else if (extension === "xlsb") {
+    text = extractXlsbText(bytes);
   } else if (extension === "hwpx") {
     const archive = await JSZip.loadAsync(bytes);
     const sections = Object.values(archive.files).filter((file) => /(^|\/)Contents\/section\d+\.xml$/i.test(file.name));
