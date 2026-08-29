@@ -99,6 +99,45 @@ function attachmentsOf(item: Record<string, unknown>, key: string): Attachment[]
   for (let index = 1; index <= 5; index += 1) add(value(item, `sptDscrptFileNm${index}`), value(item, `sptDscrptDocUrl${index}`), `보충설명문서 ${index}`);
   return attachments;
 }
+type EorderAttachment = { eorderAtchFileNm?: unknown; eorderAtchFileUrl?: unknown; bidNtceNo?: unknown; bidNtceOrd?: unknown; atchSno?: unknown };
+
+async function fetchEorderAttachments(serviceKey: string, bidNtceNo: string): Promise<EorderAttachment[]> {
+  const url = new URL(`${BASE_URL}/getBidPblancListInfoEorderAtchFileInfo`);
+  [["serviceKey", serviceKey], ["type", "json"], ["numOfRows", "100"], ["pageNo", "1"], ["inqryDiv", "1"], ["bidNtceNo", bidNtceNo]].forEach(([key, entry]) => url.searchParams.set(key, entry));
+  const payload = await fetchApiPage(url, "용역 첨부파일");
+  const header = payload.response?.header;
+  if (header && String(header.resultCode ?? "00") !== "00") {
+    // This operation is supplementary. An upstream permission/availability
+    // error must not discard an otherwise valid notice-list response.
+    console.warn(`[Nara] e발주 첨부 조회 ${bidNtceNo} 실패 (${header.resultCode}): ${header.resultMsg ?? "응답 오류"}`);
+    return [];
+  }
+  const raw = payload.response?.body?.items;
+  const items = Array.isArray(raw) ? raw : (raw as { item?: EorderAttachment | EorderAttachment[] } | undefined)?.item;
+  return Array.isArray(items) ? items : items ? [items] : [];
+}
+
+async function enrichEorderAttachments(serviceKey: string, notices: BidNotice[]) {
+  // Keep the supplementary calls bounded: the official API is rate-limited,
+  // and a slow attachment catalogue must not starve the main list collection.
+  for (let index = 0; index < notices.length; index += 4) {
+    await Promise.all(notices.slice(index, index + 4).map(async (notice) => {
+      try {
+        const extra = await fetchEorderAttachments(serviceKey, notice.bidNumber);
+        const existing = new Set(notice.attachments.map((attachment) => attachment.sourceUrl || `${attachment.name}:${attachment.kind}`));
+        for (const file of extra) {
+          const name = value(file as Record<string, unknown>, "eorderAtchFileNm") || "e발주 첨부파일";
+          const sourceUrl = value(file as Record<string, unknown>, "eorderAtchFileUrl");
+          if (!sourceUrl || existing.has(sourceUrl)) continue;
+          existing.add(sourceUrl);
+          notice.attachments.push({ id: `${notice.id}-eorder-${notice.attachments.length + 1}`, name, kind: name.split("?")[0].split(".").pop()?.toUpperCase() || "FILE", status: "대기", sourceUrl });
+        }
+      } catch (error) {
+        console.warn(`[Nara] e발주 첨부 조회 전송 실패 ${notice.bidNumber}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }));
+  }
+}
 function normalizeItem(item: Record<string, unknown>, businessType: BusinessType): BidNotice | null {
   const bidNumber = value(item, "bidNtceNo", "bidNtceNoInfo");
   if (!bidNumber) return null;
@@ -144,6 +183,7 @@ export class NarajangteoBidSource implements BidSource {
     }));
     // Keep every unique notice returned by the service query.
     const unique = Array.from(new Map(notices.map((notice) => [notice.id, notice])).values());
+    await enrichEorderAttachments(serviceKey, unique);
     return unique;
   }
 }
