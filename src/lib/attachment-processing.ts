@@ -69,7 +69,7 @@ export async function processAttachment(noticeId: string, attachment: Attachment
         pages = extracted.pages;
       }
     }
-    if (!text.trim()) return { ...attachment, status: "부분 분석", pages, failureReason: extension === "pdf" && process.env.OCR_ENABLED !== "true" ? "텍스트 레이어가 없는 PDF입니다. GitHub Actions OCR 재처리 대기" : "텍스트를 추출하지 못했습니다. 원문 확인이 필요합니다." };
+    if (!text.trim()) return { ...attachment, status: "부분 분석", pages, failureReason: extension === "pdf" && process.env.OCR_ENABLED !== "true" ? "텍스트 레이어가 없는 PDF입니다. GitHub Actions OCR 재처리 대기" : `${extension.toUpperCase()} 텍스트를 추출하지 못했습니다. 원문 확인이 필요합니다.` };
     return { ...attachment, status: "분석 완료", pages, extractedText: text.slice(0, MAX_EXTRACTED_TEXT_CHARS) };
   } catch (error) {
     return { ...attachment, status: "추출 실패", failureReason: error instanceof Error ? error.message : "첨부파일 처리 중 알 수 없는 오류" };
