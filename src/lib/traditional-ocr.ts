@@ -23,6 +23,28 @@ export async function extractHwpTextWithLibreOffice(hwp: Buffer) {
   }
 }
 
+/**
+ * Renders image-only HWP files through LibreOffice, then applies the same
+ * local Korean OCR pipeline used for scanned PDFs. This is intentionally a
+ * fallback after direct text conversion and sends no document data to an AI
+ * service.
+ */
+export async function extractHwpTextWithLibreOfficeOcr(hwp: Buffer) {
+  if (process.env.OCR_ENABLED !== "true" || process.platform !== "linux") return "";
+  const directory = await mkdtemp(join(tmpdir(), "bidfit-hwp-pdf-"));
+  const input = join(directory, "source.hwp");
+  const pdf = join(directory, "source.pdf");
+  try {
+    await writeFile(input, hwp);
+    await execFileAsync("libreoffice", ["--headless", "--convert-to", "pdf", "--outdir", directory, input], { timeout: 120_000, maxBuffer: 1_024 * 1_024 });
+    return await extractPdfTextWithTraditionalOcr(await readFile(pdf));
+  } catch {
+    return "";
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
 /** Uses pyhwp's deterministic HWP5 converter when available on the worker. */
 export async function extractHwpTextWithPyhwp(hwp: Buffer) {
   if (process.env.OCR_ENABLED !== "true" || process.platform !== "linux") return "";

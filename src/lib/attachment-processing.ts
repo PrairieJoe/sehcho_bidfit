@@ -1,7 +1,7 @@
 import JSZip from "jszip";
 import type { Attachment } from "@/lib/types";
 import { extractHwpText } from "@/lib/hwp-text";
-import { extractHwpTextWithLibreOffice, extractHwpTextWithPyhwp, extractPdfTextWithTraditionalOcr } from "@/lib/traditional-ocr";
+import { extractHwpTextWithLibreOffice, extractHwpTextWithLibreOfficeOcr, extractHwpTextWithPyhwp, extractPdfTextWithTraditionalOcr } from "@/lib/traditional-ocr";
 
 export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 const MAX_EXTRACTED_TEXT_CHARS = 200_000;
@@ -53,6 +53,7 @@ export async function processAttachment(noticeId: string, attachment: Attachment
       pages = parsed.pages;
       if (!text.trim()) text = await extractHwpTextWithPyhwp(bytes);
       if (!text.trim()) text = await extractHwpTextWithLibreOffice(bytes);
+      if (!text.trim()) text = await extractHwpTextWithLibreOfficeOcr(bytes);
     } else if (extension === "pdf") {
       const parser = (await import("pdf-parse")).default;
       const parsed = await parser(bytes);
