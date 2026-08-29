@@ -221,7 +221,10 @@ export async function processAttachment(noticeId: string, attachment: Attachment
           const candidateBytes = Buffer.from(await response.arrayBuffer());
           if (candidateBytes.length > MAX_ATTACHMENT_BYTES) return { ...attachment, status: "보류", failureReason: "파일 크기가 50MB 제한을 초과합니다." };
           const detectedExtension = sniffExtension(candidateBytes, extension);
-          if (!looksLikeDocument(candidateBytes, sniffableUnknown ? detectedExtension : extension) || (sniffableUnknown && detectedExtension === extension)) {
+          // G2B occasionally labels a legacy CFB/HWP payload as HWPX (and
+          // vice versa). Trust the bytes before the filename extension; the
+          // effective extractor below already uses the detected container.
+          if (!looksLikeDocument(candidateBytes, detectedExtension) || (sniffableUnknown && detectedExtension === extension)) {
             lastDownloadError = new Error(`${extension.toUpperCase()}이 아닌 응답(${candidateBytes.subarray(0, 8).toString("hex")})`);
             break;
           }
