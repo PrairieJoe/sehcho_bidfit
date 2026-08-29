@@ -1,14 +1,15 @@
 import JSZip from "jszip";
+import CFB from "cfb";
 import type { Attachment } from "@/lib/types";
 import { extractHwpText } from "@/lib/hwp-text";
 import { extractHwpTextWithLibreOffice, extractHwpTextWithLibreOfficeOcr, extractHwpTextWithPyhwp, extractPdfTextWithTraditionalOcr } from "@/lib/traditional-ocr";
 
-export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
 const MAX_EXTRACTED_TEXT_CHARS = 200_000;
 const ATTACHMENT_DOWNLOAD_TIMEOUT_MS = 30_000;
 const MAX_ARCHIVE_ENTRIES = 30;
-const MAX_ARCHIVE_BYTES = 20 * 1024 * 1024;
-const SUPPORTED_DOCUMENTS = ['pdf', 'hwpx', 'hwp', 'docx', 'xlsx', 'xlsm', 'pptx'];
+const MAX_ARCHIVE_BYTES = 50 * 1024 * 1024;
+const SUPPORTED_DOCUMENTS = ['pdf', 'hwpx', 'hwp', 'docx', 'xlsx', 'xls', 'xlsm', 'pptx'];
 
 function extensionOf(name: string) { return name.split("?")[0].split(".").pop()?.toLowerCase() ?? ""; }
 function cleanXml(value: string) { return value.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim(); }
@@ -23,6 +24,27 @@ async function extractOfficeText(bytes: Buffer, extension: string) {
       : files.filter((file) => /^xl\/(sharedStrings|worksheets\/sheet\d+)\.xml$/i.test(file.name));
   const text = (await Promise.all(matching.map((file) => file.async("string")))).map(cleanXml).filter(Boolean).join("\n");
   return { text, pages: matching.length || undefined };
+}
+
+function extractLegacyXlsText(bytes: Buffer) {
+  const workbook = CFB.parse(bytes, { type: "buffer" });
+  const streams = (workbook.FileIndex ?? []).filter((entry: any) => entry.type === 2 && /^(Workbook|Book)$/i.test(String(entry.name)));
+  const chunks: string[] = [];
+  for (const stream of streams) {
+    const content = Buffer.from(stream.content ?? []);
+    let current = "";
+    for (let offset = 0; offset + 1 < content.length; offset += 2) {
+      const code = content.readUInt16LE(offset);
+      const printable = code === 9 || code === 10 || code === 13 || (code >= 32 && code !== 127 && (code < 0xd800 || code > 0xdfff));
+      if (printable) current += String.fromCharCode(code);
+      else {
+        if (current.trim().length >= 3) chunks.push(current.trim());
+        current = "";
+      }
+    }
+    if (current.trim().length >= 3) chunks.push(current.trim());
+  }
+  return [...new Set(chunks)].join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
 async function extractBytesText(bytes: Buffer, extension: string): Promise<{ text: string; pages?: number }> {
@@ -41,6 +63,8 @@ async function extractBytesText(bytes: Buffer, extension: string): Promise<{ tex
     text = parsed.text;
     pages = parsed.numpages;
     if (!text.trim()) text = await extractPdfTextWithTraditionalOcr(bytes);
+  } else if (extension === "xls") {
+    text = extractLegacyXlsText(bytes);
   } else if (extension === "hwpx") {
     const archive = await JSZip.loadAsync(bytes);
     const sections = Object.values(archive.files).filter((file) => /(^|\/)Contents\/section\d+\.xml$/i.test(file.name));

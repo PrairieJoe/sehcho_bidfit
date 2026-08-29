@@ -57,9 +57,9 @@ export async function requeueTraditionalOcrCandidates(noticeIds: string[]) {
       // HWPX/Office parsers and OCR fallback were improved. Allow a bounded
       // second recovery window for those same supported files.
       const scanPdf = name.endsWith(".pdf") && String(attachment?.status ?? "") === "부분 분석" && /텍스트 레이어가 없는 PDF|텍스트를 추출하지 못했습니다/.test(reason);
-      const newlySupportedOffice = /\.(docx|xlsx|xlsm|pptx)$/.test(name) && String(attachment?.status ?? "") === "보류" && /PDF·HWP·HWPX만 현재 처리합니다|지원하지 않는 파일 형식/.test(reason);
+      const newlySupportedOffice = /\.(docx|xlsx|xls|xlsm|pptx)$/.test(name) && String(attachment?.status ?? "") === "보류" && /PDF·HWP·HWPX만 현재 처리합니다|지원하지 않는 파일 형식/.test(reason);
       const newlySupportedZip = name.endsWith(".zip") && /지원하지 않는 파일 형식|ZIP|PDF·HWP·HWPX만 현재 처리합니다/.test(reason);
-      const legacySupportedExtraction = /\.(pdf|hwpx|hwp|docx|xlsx|pptx)$/.test(name) && /텍스트를 추출하지 못했습니다/.test(reason);
+      const legacySupportedExtraction = /\.(pdf|hwpx|hwp|docx|xlsx|xls|xlsm|pptx)$/.test(name) && /텍스트를 추출하지 못했습니다/.test(reason);
       const hwpBundleFailure = name.endsWith(".hwp") && /Cannot find module ['\"]cfb['\"]/.test(reason);
       const transientFailure = /operation was aborted due to timeout|Command failed: (tesseract|pdftoppm)/i.test(reason);
       // ZIP support was added after some jobs exhausted the old retry budget.
