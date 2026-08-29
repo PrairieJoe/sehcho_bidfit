@@ -64,7 +64,7 @@ export async function requeueTraditionalOcrCandidates(noticeIds: string[]) {
       const transientFailure = /operation was aborted due to timeout|Command failed: (tesseract|pdftoppm)/i.test(reason);
       // ZIP support was added after some jobs exhausted the old retry budget.
       // Give only this newly supported format one bounded recovery pass.
-      if (attempts >= 10 && !newlySupportedZip) continue;
+      if (attempts >= 10 && !(newlySupportedZip || newlySupportedOffice)) continue;
       if (scanPdf || newlySupportedOffice || newlySupportedZip || legacySupportedExtraction || hwpBundleFailure || transientFailure) ids.push(String((row as Row).id));
     }
   }
