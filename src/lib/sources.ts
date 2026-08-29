@@ -54,6 +54,18 @@ async function fetchApiPage(url: URL, businessType: string) {
       lastError = error;
       const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
       console.warn(`[Nara] ${businessType} API transport attempt ${attempt}/5 failed: ${detail}`);
+      // A hosted runner can establish the connection with undici even when
+      // the native https client stalls during address/TLS negotiation. Try a
+      // second transport before spending the next backoff interval.
+      try {
+        const response = await fetch(url, { headers: { Accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(45_000) });
+        if (!response.ok) throw new Error(`나라장터 ${businessType} 목록 조회 실패 (${response.status})`);
+        return await response.json() as { response?: { header?: { resultCode?: string | number; resultMsg?: string }; body?: { items?: { item?: Record<string, unknown> | Record<string, unknown>[] } | Record<string, unknown>[]; totalCount?: number } } };
+      } catch (fallbackError) {
+        lastError = fallbackError;
+        const fallbackDetail = fallbackError instanceof Error ? `${fallbackError.name}: ${fallbackError.message}` : String(fallbackError);
+        console.warn(`[Nara] ${businessType} fetch fallback failed: ${fallbackDetail}`);
+      }
       if (attempt < 5) await new Promise((resolve) => setTimeout(resolve, 2 ** attempt * 1_000));
     }
   }
