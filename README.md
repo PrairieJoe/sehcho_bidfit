@@ -35,7 +35,7 @@ Vercel 프로젝트의 `Settings → Environment Variables`에서 `Production` �
 
 ## 배치
 
-정기 배치는 GitHub Actions의 `.github/workflows/daily-batch.yml`이 `15 23 * * *`(UTC), 한국 시간 오전 8시 15분에 실행하도록 구성합니다. 정각 집중 지연을 피하면서 8~9시 범위 안에서 실행하며, Actions가 Vercel 함수 시간 제한 없이 전체 작업을 끝까지 수행합니다. `workflow_dispatch`로 실패한 배치를 수동 재시도할 수 있습니다. Vercel은 공개 웹 화면과 관리자 설정만 제공합니다. 운영 화면에는 실제로 저장된 실행 시각과 분석 구간이 표시됩니다.
+정기 배치는 GitHub Actions의 `.github/workflows/daily-batch.yml`이 `15 23 * * *`(UTC), 한국 시간 오전 8시 15분에 실행하도록 구성합니다. 정각 집중 지연을 피하면서 8~9시 범위 안에서 실행하며, Actions가 Vercel 함수 시간 제한 없이 전체 작업을 끝까지 수행합니다. GitHub 스케줄 이벤트가 생성되지 않는 운영 공백에 대비해 Vercel Cron도 `20 23 * * *`(UTC)에 백업 실행하며, Supabase 배치 잠금으로 중복 실행을 차단합니다. `workflow_dispatch` 또는 관리자 화면에서 실패한 배치를 수동 재시도할 수 있습니다. 운영 화면에는 실제로 저장된 실행 시각과 분석 구간이 표시됩니다.
 
 배치는 실행시각 기준 최근 24시간의 용역 공고만 조회합니다. `입찰공고번호 + 공고차수`로 중복을 제거합니다. 첨부파일별 큐 작업에서 PDF·HWP·HWPX의 텍스트만 추출합니다. 모든 첨부 작업이 끝나면 공고당 한 번 Gemini에 정제 텍스트를 전송합니다. 성공하면 원본 파일은 저장하지 않고, Supabase의 임시 추출 텍스트도 즉시 삭제하며 점수·요약·AI 생성 근거만 남깁니다.
 

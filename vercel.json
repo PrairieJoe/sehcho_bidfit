@@ -1,5 +1,11 @@
 {
   "installCommand": "pnpm install --no-frozen-lockfile",
+  "crons": [
+    {
+      "path": "/api/cron/daily",
+      "schedule": "20 23 * * *"
+    }
+  ],
   "functions": {
     "src/app/api/queues/attachment/route.ts": {
       "maxDuration": 300,
