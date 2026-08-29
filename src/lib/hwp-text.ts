@@ -1,15 +1,10 @@
 import { inflateRawSync } from "node:zlib";
+import CFB from "cfb";
 
 type CfbEntry = { name: string; content: Uint8Array };
-type CfbModule = { read(data: Buffer, opts: { type: string }): { FullPaths: string[]; FileIndex: CfbEntry[] } };
 
 /** Extracts text from the binary HWP 5 (OLE Compound File) format. */
 export function extractHwpText(input: Buffer): { text: string; pages?: number } {
-  // cfb is intentionally loaded at runtime so deployments can bundle the small
-  // parser without exposing any document bytes to a third-party service.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const dynamicRequire = eval("require") as (name: string) => unknown;
-  const CFB = dynamicRequire("cfb") as CfbModule;
   const ole = CFB.read(input, { type: "buffer" });
   const entries = ole.FileIndex ?? [];
   const sections = entries.filter((entry) => /(^|\\)BodyText[\\/]Section\\d+$/i.test(entry.name));
