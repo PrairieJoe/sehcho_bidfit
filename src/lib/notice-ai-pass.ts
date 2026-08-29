@@ -153,7 +153,13 @@ export async function processNoticeAiJob(aiJobId: string, batchId?: string) {
     if (noticeError) throw noticeError;
     const notice = noticeOf(row);
     if (notice.attachments.length && !notice.attachments.every((item) => item.status === "분석 완료" && item.extractedText?.trim())) {
-      throw new Error("모든 첨부문서 분석 완료 전에는 Gemini 점수를 생성하지 않습니다.");
+      // Attachment and AI consumers can observe the same notice concurrently.
+      // Not-ready is a defer condition, not an AI failure: leave the durable
+      // job pending so the attachment worker/continuation can enqueue it again
+      // after the final text is persisted.
+      await admin.from("notice_ai_jobs").update({ status: "대기", failure_reason: null, updated_at: new Date().toISOString() }).eq("id", aiJobId);
+      await finishActiveBatchIfDrained();
+      return { skipped: true, deferred: true, reason: "첨부문서 처리 완료 후 재시도합니다." };
     }
     const { data: topics, error: topicError } = await admin.from("topics").select("*").limit(10);
     if (topicError) throw topicError;
