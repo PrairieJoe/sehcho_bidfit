@@ -96,20 +96,28 @@ export async function enqueueReadyNoticeAiJobs(options: { publish?: boolean; not
   // network calls while still leaving every job durable in Supabase.
   for (let index = 0; index < readyRows.length; index += 100) {
     const part = readyRows.slice(index, index + 100);
-    const { data: jobs, error: jobsError } = await admin.from("notice_ai_jobs").select("id,notice_id,input_hash,status").in("notice_id", part.map((row) => row.noticeId));
+    const { data: jobs, error: jobsError } = await admin.from("notice_ai_jobs").select("id,notice_id,input_hash,status,failure_reason").in("notice_id", part.map((row) => row.noticeId));
     if (jobsError) throw jobsError;
     const matching = (jobs ?? []).filter((job: Row) => part.some((row) => row.noticeId === String(job.notice_id) && row.inputHash === String(job.input_hash) && job.status !== "완료"));
-    const retryIds = matching.filter((job: Row) => job.status === "실패").map((job: Row) => String(job.id));
+    // A quota failure is a durable daily-limit signal, not a transient job
+    // failure. Never turn it back into a pending job during the same daily
+    // run; doing so repeatedly burns the remaining free-tier allowance and
+    // obscures the original cause. Other provider failures may be retried.
+    const retryIds = matching
+      .filter((job: Row) => job.status === "실패" && !/quota|429|RESOURCE_EXHAUSTED|rate limit/i.test(String(job.failure_reason ?? "")))
+      .map((job: Row) => String(job.id));
     if (retryIds.length) {
       const { error: retryError } = await admin.from("notice_ai_jobs").update({ status: "대기", failure_reason: null, updated_at: new Date().toISOString() }).in("id", retryIds);
       if (retryError) throw retryError;
     }
+    const retrySet = new Set(retryIds);
+    const publishable = matching.filter((job: Row) => job.status === "대기" || retrySet.has(String(job.id)));
     if (options.publish ?? true) {
-      for (let offset = 0; offset < matching.length; offset += 8) {
-        await Promise.all(matching.slice(offset, offset + 8).map((job: Row) => send<NoticeAiQueueMessage>(NOTICE_AI_QUEUE_TOPIC, { aiJobId: String(job.id) }, { idempotencyKey: `${String(job.notice_id)}:${String(job.input_hash)}`, retentionSeconds: 86_400 })));
+      for (let offset = 0; offset < publishable.length; offset += 8) {
+        await Promise.all(publishable.slice(offset, offset + 8).map((job: Row) => send<NoticeAiQueueMessage>(NOTICE_AI_QUEUE_TOPIC, { aiJobId: String(job.id) }, { idempotencyKey: `${String(job.notice_id)}:${String(job.input_hash)}`, retentionSeconds: 86_400 })));
       }
     }
-    aiQueued += matching.length;
+    aiQueued += publishable.length;
   }
   return { aiQueued };
 }
