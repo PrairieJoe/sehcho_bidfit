@@ -44,7 +44,7 @@ export async function POST(request: Request) {
     await enqueueReadyNoticeAiJobs({ publish: false, noticeIds });
     const aiProcessed = await processPendingNoticeAiJobsInline(8, undefined, noticeIds, true, String(active.id));
     const [{ count: pendingAttachments, error: attachmentError }, { count: pendingAi, error: aiError }] = await Promise.all([
-      admin.from("processing_jobs").select("id,attachments!inner(notice_id)", { count: "exact", head: true }).in("status", ["대기", "처리 중"]).in("attachments.notice_id", noticeIds),
+      admin.from("processing_jobs").select("id,attachments!inner(notice_id,is_current)", { count: "exact", head: true }).eq("attachments.is_current", true).in("status", ["대기", "처리 중"]).in("attachments.notice_id", noticeIds),
       admin.from("notice_ai_jobs").select("id", { count: "exact", head: true }).in("status", ["대기", "처리 중"]).in("notice_id", noticeIds),
     ]);
     if (attachmentError || aiError) throw attachmentError ?? aiError;
