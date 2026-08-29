@@ -117,7 +117,16 @@ export async function processAttachment(noticeId: string, attachment: Attachment
     let lastDownloadError: unknown;
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       try {
-        response = await fetch(attachment.sourceUrl, { cache: "no-store", redirect: "follow", signal: AbortSignal.timeout(ATTACHMENT_DOWNLOAD_TIMEOUT_MS) });
+        response = await fetch(attachment.sourceUrl, {
+          cache: "no-store",
+          redirect: "follow",
+          headers: {
+            Accept: "application/octet-stream, application/pdf, application/zip, */*",
+            "User-Agent": "Mozilla/5.0 (compatible; BidFit/1.0)",
+            Referer: "https://www.g2b.go.kr/",
+          },
+          signal: AbortSignal.timeout(ATTACHMENT_DOWNLOAD_TIMEOUT_MS),
+        });
         if (response.ok || response.status < 500 || attempt === 3) break;
       } catch (error) {
         lastDownloadError = error;
