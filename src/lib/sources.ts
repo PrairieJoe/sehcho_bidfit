@@ -104,22 +104,30 @@ export class NarajangteoBidSource implements BidSource {
     const notices: BidNotice[] = [];
     // Query the service catalogue and walk every page in the requested window.
     await Promise.all(LIST_ENDPOINTS.map(async ([businessType, endpoint]) => {
-      for (let pageNo = 1; ; pageNo += 1) {
-      const url = new URL(`${BASE_URL}/${endpoint}`);
-      [["serviceKey", serviceKey], ["type", "json"], ["numOfRows", String(PAGE_SIZE)], ["pageNo", String(pageNo)], ["inqryDiv", "1"], ["inqryBgnDt", requestDate(windowStart)], ["inqryEndDt", requestDate(windowEnd)]].forEach(([key, entry]) => url.searchParams.set(key, entry));
-      const payload = await fetchApiPage(url, businessType);
-      const header = payload.response?.header;
-      if (header && String(header.resultCode ?? "00") !== "00") throw new Error(`나라장터 ${businessType} API 오류 (${header.resultCode}): ${header.resultMsg ?? "응답 오류"}`);
-      const body = payload.response?.body;
-      const raw = Array.isArray(body?.items) ? body.items : body?.items?.item;
-      if (!body) throw new Error(`나라장터 ${businessType} API 응답 형식 오류`);
-      const items = Array.isArray(raw) ? raw : raw ? [raw] : [];
-      diagnostics.push(`${businessType}: code=${String(header?.resultCode ?? "00")}, total=${String(body.totalCount ?? 0)}, items=${items.length}`);
-      const attachmentFieldCount = items.filter((entry) => attachmentsOf(entry, `${value(entry, "bidNtceNo", "bidNtceNoInfo")}-${value(entry, "bidNtceOrd", "bidNtceOrdNo") || "000"}`).length > 0).length;
-      console.log(`[Nara] ${businessType} 목록 ${items.length}건 중 첨부 필드 확인 ${attachmentFieldCount}건`);
-      notices.push(...items.map((entry) => normalizeItem(entry, businessType)).filter((entry): entry is BidNotice => Boolean(entry)));
-      const totalCount = Number(payload.response?.body?.totalCount ?? 0);
-      if (items.length < PAGE_SIZE || pageNo * PAGE_SIZE >= totalCount) break;
+      // Large 24-hour catalogue requests intermittently exceed the upstream
+      // response window. Smaller contiguous slices keep the same requested
+      // analysis window while making each transport request bounded.
+      const sliceSize = 6 * 60 * 60 * 1_000;
+      for (let sliceStartMs = windowStart.getTime(); sliceStartMs < windowEnd.getTime(); sliceStartMs += sliceSize) {
+        const sliceStart = new Date(sliceStartMs);
+        const sliceEnd = new Date(Math.min(sliceStartMs + sliceSize, windowEnd.getTime()));
+        for (let pageNo = 1; ; pageNo += 1) {
+          const url = new URL(`${BASE_URL}/${endpoint}`);
+          [["serviceKey", serviceKey], ["type", "json"], ["numOfRows", String(PAGE_SIZE)], ["pageNo", String(pageNo)], ["inqryDiv", "1"], ["inqryBgnDt", requestDate(sliceStart)], ["inqryEndDt", requestDate(sliceEnd)]].forEach(([key, entry]) => url.searchParams.set(key, entry));
+          const payload = await fetchApiPage(url, businessType);
+          const header = payload.response?.header;
+          if (header && String(header.resultCode ?? "00") !== "00") throw new Error(`나라장터 ${businessType} API 오류 (${header.resultCode}): ${header.resultMsg ?? "응답 오류"}`);
+          const body = payload.response?.body;
+          const raw = Array.isArray(body?.items) ? body.items : body?.items?.item;
+          if (!body) throw new Error(`나라장터 ${businessType} API 응답 형식 오류`);
+          const items = Array.isArray(raw) ? raw : raw ? [raw] : [];
+          diagnostics.push(`${businessType}: ${requestDate(sliceStart)}~${requestDate(sliceEnd)} code=${String(header?.resultCode ?? "00")}, total=${String(body.totalCount ?? 0)}, items=${items.length}`);
+          const attachmentFieldCount = items.filter((entry) => attachmentsOf(entry, `${value(entry, "bidNtceNo", "bidNtceNoInfo")}-${value(entry, "bidNtceOrd", "bidNtceOrdNo") || "000"}`).length > 0).length;
+          console.log(`[Nara] ${businessType} 목록 ${items.length}건 중 첨부 필드 확인 ${attachmentFieldCount}건`);
+          notices.push(...items.map((entry) => normalizeItem(entry, businessType)).filter((entry): entry is BidNotice => Boolean(entry)));
+          const totalCount = Number(payload.response?.body?.totalCount ?? 0);
+          if (items.length < PAGE_SIZE || pageNo * PAGE_SIZE >= totalCount) break;
+        }
       }
     }));
     // Keep every unique notice returned by the service query.
