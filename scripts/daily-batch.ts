@@ -11,9 +11,18 @@ function kstDayBounds(now = new Date()) {
 async function alreadyCompletedToday() {
   const { start, end } = kstDayBounds();
   const admin = createSupabaseAdminClient();
-  const { data, error } = await admin.from("batch_runs").select("id,started_at").eq("status", "완료").gte("started_at", start.toISOString()).lt("started_at", end.toISOString()).limit(1).maybeSingle();
+  const { data, error } = await admin.from("batch_runs").select("id,started_at,discovered,analyzed,error_summary").eq("status", "완료").gte("started_at", start.toISOString()).lt("started_at", end.toISOString()).order("started_at", { ascending: false }).limit(20);
   if (error) throw error;
-  return data;
+  // A zero-row/empty completion must not suppress the scheduled retry. A
+  // batch is reusable as today's completed snapshot only when every notice
+  // discovered by that batch has a durable Gemini result and no diagnostic
+  // error was recorded. This also prevents an old false-positive completion
+  // from masking a later partial run.
+  return (data ?? []).find((row) => {
+    const discovered = Number(row.discovered ?? 0);
+    const analyzed = Number(row.analyzed ?? 0);
+    return discovered > 0 && analyzed === discovered && !String(row.error_summary ?? "").trim();
+  });
 }
 
 async function main() {
