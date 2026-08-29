@@ -117,6 +117,37 @@ async function fetchEorderAttachments(serviceKey: string, bidNtceNo: string): Pr
   return Array.isArray(items) ? items : items ? [items] : [];
 }
 
+async function fetchNoticeDetail(serviceKey: string, bidNtceNo: string) {
+  const url = new URL(`${BASE_URL}/getBidPblancListInfoServc`);
+  [["serviceKey", serviceKey], ["type", "json"], ["numOfRows", "10"], ["pageNo", "1"], ["inqryDiv", "2"], ["bidNtceNo", bidNtceNo]].forEach(([key, entry]) => url.searchParams.set(key, entry));
+  const payload = await fetchApiPage(url, "용역 공고 상세");
+  const header = payload.response?.header;
+  if (header && String(header.resultCode ?? "00") !== "00") return null;
+  const raw = payload.response?.body?.items;
+  const items = Array.isArray(raw) ? raw : (raw as { item?: Record<string, unknown> | Record<string, unknown>[] } | undefined)?.item;
+  return Array.isArray(items) ? items[0] : items ?? null;
+}
+
+async function refreshNoticeAttachments(serviceKey: string, notices: BidNotice[]) {
+  let refreshed = 0;
+  for (let index = 0; index < notices.length; index += 4) {
+    await Promise.all(notices.slice(index, index + 4).map(async (notice) => {
+      try {
+        const detail = await fetchNoticeDetail(serviceKey, notice.bidNumber);
+        if (!detail) return;
+        const attachments = attachmentsOf(detail, notice.id);
+        if (attachments.length) {
+          notice.attachments = attachments;
+          refreshed += 1;
+        }
+      } catch (error) {
+        console.warn(`[Nara] 용역 공고 상세 조회 전송 실패 ${notice.bidNumber}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }));
+  }
+  console.log(`[Nara] 용역 공고번호 상세 조회 첨부 URL 갱신 ${refreshed}/${notices.length}건`);
+}
+
 async function enrichEorderAttachments(serviceKey: string, notices: BidNotice[]) {
   // Keep the supplementary calls bounded: the official API is rate-limited,
   // and a slow attachment catalogue must not starve the main list collection.
@@ -183,6 +214,7 @@ export class NarajangteoBidSource implements BidSource {
     }));
     // Keep every unique notice returned by the service query.
     const unique = Array.from(new Map(notices.map((notice) => [notice.id, notice])).values());
+    await refreshNoticeAttachments(serviceKey, unique);
     await enrichEorderAttachments(serviceKey, unique);
     return unique;
   }
