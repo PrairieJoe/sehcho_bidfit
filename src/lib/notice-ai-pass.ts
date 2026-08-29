@@ -13,7 +13,10 @@ const topicOf = (row: Row): Topic => ({ id: String(row.id), name: String(row.nam
 const noticeOf = (row: Row): BidNotice => ({ id: String(row.id), bidNumber: String(row.bid_number), order: String(row.bid_order), title: String(row.title), businessType: String(row.business_type) as BidNotice["businessType"], status: String(row.status) as BidNotice["status"], agency: String(row.agency), demandAgency: String(row.demand_agency), region: String(row.region), publishedAt: String(row.published_at ?? ""), closesAt: String(row.closes_at ?? ""), budget: row.budget == null ? null : Number(row.budget), budgetLabel: String(row.budget_label), contractMethod: String(row.contract_method), detailUrl: String(row.detail_url), description: String(row.description), tasks: list(row.tasks), qualifications: list(row.qualifications), attachments: (row.attachments ?? []).map((item: Row) => ({ id: String(item.id), name: String(item.name), kind: String(item.kind), status: String(item.status) as BidNotice["attachments"][number]["status"], extractedText: String((Array.isArray(item.attachment_texts) ? item.attachment_texts[0] : item.attachment_texts)?.extracted_text ?? "") || undefined })), reviewState: "검토 전" });
 
 function inputHashOf(analyzerVersion: string, notice: Row, attachments: Row[]) {
-  return createHash("sha256").update(`${analyzerVersion}|${String(notice.title ?? "")}|${String(notice.description ?? "")}|${attachments.map((item) => `${item.id}:${item.sha256 ?? ""}:${String((Array.isArray(item.attachment_texts) ? item.attachment_texts[0] : item.attachment_texts)?.extracted_text ?? "").length}`).sort().join("|")}`, "utf8").digest("hex");
+  // Include the collection fingerprint so a completed job from an older
+  // overlapping window cannot suppress analysis for a changed/reposted
+  // notice in the current batch.
+  return createHash("sha256").update(`${analyzerVersion}|${String(notice.source_hash ?? "")}|${String(notice.title ?? "")}|${String(notice.description ?? "")}|${attachments.map((item) => `${item.id}:${item.sha256 ?? ""}:${String((Array.isArray(item.attachment_texts) ? item.attachment_texts[0] : item.attachment_texts)?.extracted_text ?? "").length}`).sort().join("|")}`, "utf8").digest("hex");
 }
 
 export async function enqueueNoticeAiWhenReady(noticeId: string, delaySeconds = 0, publish = true) {
@@ -23,7 +26,7 @@ export async function enqueueNoticeAiWhenReady(noticeId: string, delaySeconds = 
   const { data: attachments, error } = await admin.from("attachments").select("id,status,sha256,attachment_texts(extracted_text)").eq("notice_id", noticeId);
   if (error) throw error;
   const rows = attachments ?? [];
-  const { data: noticeMeta, error: noticeMetaError } = await admin.from("notices").select("title,description").eq("id", noticeId).maybeSingle();
+  const { data: noticeMeta, error: noticeMetaError } = await admin.from("notices").select("title,description,source_hash").eq("id", noticeId).maybeSingle();
   if (noticeMetaError) throw noticeMetaError;
   const completedRows = rows.filter((item: Row) => item.status === "분석 완료");
   const textRows = completedRows.filter((item: Row) => String((Array.isArray(item.attachment_texts) ? item.attachment_texts[0] : item.attachment_texts)?.extracted_text ?? "").trim());
@@ -64,13 +67,13 @@ export async function enqueueReadyNoticeAiJobs(options: { publish?: boolean; not
     for (let index = 0; index < options.noticeIds.length; index += 100) {
       const { data: part, error } = await admin
         .from("notices")
-        .select("id,title,description,attachments(id,status,sha256,attachment_texts(extracted_text))")
+        .select("id,title,description,source_hash,attachments(id,status,sha256,attachment_texts(extracted_text))")
         .in("id", options.noticeIds.slice(index, index + 100));
       if (error) throw error;
       data.push(...(part ?? []));
     }
   } else {
-    const { data: part, error } = await admin.from("notices").select("id,title,description,attachments(id,status,sha256,attachment_texts(extracted_text))").order("updated_at", { ascending: false }).limit(5_000);
+    const { data: part, error } = await admin.from("notices").select("id,title,description,source_hash,attachments(id,status,sha256,attachment_texts(extracted_text))").order("updated_at", { ascending: false }).limit(5_000);
     if (error) throw error;
     data.push(...(part ?? []));
   }
