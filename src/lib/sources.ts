@@ -67,11 +67,10 @@ async function fetchApiPage(url: URL, businessType: string, maxAttempts = 5) {
       const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
       console.warn(`[Nara] ${businessType} API transport attempt ${attempt}/5 failed: ${detail}`);
       // A 429 is an upstream rate-limit response, not a transport failure.
-      // Do not immediately issue the same request through fetch as well; that
-      // doubles the burst and can extend the provider's throttle window.
+      // Do not issue the same request through another transport or retry it;
+      // that doubles the burst and can extend the provider's throttle window.
       if (/\b429\b/.test(detail)) {
-        if (attempt < maxAttempts) await new Promise((resolve) => setTimeout(resolve, attempt * 5_000));
-        continue;
+        throw lastError instanceof Error ? lastError : new Error(detail);
       }
       // A hosted runner can establish the connection with undici even when
       // the native https client stalls during address/TLS negotiation. Try a
