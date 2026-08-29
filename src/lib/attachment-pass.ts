@@ -18,15 +18,19 @@ export async function requeueTraditionalOcrCandidates(noticeIds: string[]) {
   const admin = createSupabaseAdminClient();
   const ids: string[] = [];
   for (let index = 0; index < noticeIds.length; index += 100) {
-    const { data, error } = await admin.from("processing_jobs").select("id,attachments!inner(notice_id,name,status,failure_reason)").eq("status", "완료").in("attachments.notice_id", noticeIds.slice(index, index + 100));
+    const { data, error } = await admin.from("processing_jobs").select("id,attempts,attachments!inner(notice_id,name,status,failure_reason)").in("status", ["완료", "실패"]).in("attachments.notice_id", noticeIds.slice(index, index + 100));
     if (error) throw error;
     for (const row of data ?? []) {
       const attachment = Array.isArray((row as Row).attachments) ? (row as Row).attachments[0] : (row as Row).attachments;
       const name = String(attachment?.name ?? "").toLowerCase();
       const reason = String(attachment?.failure_reason ?? "");
-      const scanPdf = name.endsWith(".pdf") && String(attachment?.status ?? "") === "부분 분석" && reason.includes("텍스트 레이어가 없는 PDF");
+      const attempts = Number((row as Row).attempts ?? 0);
+      if (attempts >= 5) continue;
+      const scanPdf = name.endsWith(".pdf") && String(attachment?.status ?? "") === "부분 분석" && /텍스트 레이어가 없는 PDF|텍스트를 추출하지 못했습니다/.test(reason);
       const newlySupportedOffice = /\.(docx|xlsx|pptx)$/.test(name) && String(attachment?.status ?? "") === "보류" && /PDF·HWP·HWPX만 현재 처리합니다|지원하지 않는 파일 형식/.test(reason);
-      if (scanPdf || newlySupportedOffice) ids.push(String((row as Row).id));
+      const hwpBundleFailure = name.endsWith(".hwp") && /Cannot find module ['\"]cfb['\"]/.test(reason);
+      const transientFailure = /operation was aborted due to timeout|Command failed: (tesseract|pdftoppm)/i.test(reason);
+      if (scanPdf || newlySupportedOffice || hwpBundleFailure || transientFailure) ids.push(String((row as Row).id));
     }
   }
   for (let index = 0; index < ids.length; index += 100) {
