@@ -22,6 +22,14 @@ function looksLikeDocument(bytes: Buffer, extension: string) {
   return true;
 }
 
+function sniffExtension(bytes: Buffer, declaredExtension: string) {
+  if (bytes.subarray(0, 5).toString("ascii") === "%PDF-") return "pdf";
+  const head = bytes.subarray(0, 8).toString("hex").toLowerCase();
+  if (head.startsWith("504b0304") || head.startsWith("504b0506")) return "zip";
+  if (head.startsWith("d0cf11e0a1b11ae1")) return declaredExtension === "xls" ? "xls" : "hwp";
+  return declaredExtension;
+}
+
 function downloadCandidates(sourceUrl: string) {
   const candidates = [sourceUrl];
   try {
@@ -162,7 +170,12 @@ async function extractZipText(bytes: Buffer): Promise<{ text: string; pages?: nu
 export async function processAttachment(noticeId: string, attachment: Attachment): Promise<Attachment> {
   const extension = extensionOf(attachment.name || attachment.sourceUrl || "");
   if (!attachment.sourceUrl || attachment.sourceUrl.startsWith("unavailable:")) return { ...attachment, status: "보류", failureReason: "나라장터 API가 첨부파일 다운로드 주소를 제공하지 않았습니다." };
-  if (![...SUPPORTED_DOCUMENTS, "zip"].includes(extension)) return { ...attachment, status: "보류", failureReason: "지원하지 않는 파일 형식입니다. ZIP·PDF·HWP·HWPX·DOCX·XLSX·PPTX만 처리합니다." };
+  // A small number of G2B notices expose a document with a backup/binary
+  // suffix. Download those candidates and accept them only after a known
+  // PDF/ZIP/CFB signature is detected; ordinary unsupported formats remain
+  // explicitly deferred.
+  const sniffableUnknown = ["bak", "bin", "dat"].includes(extension);
+  if (![...SUPPORTED_DOCUMENTS, "zip"].includes(extension) && !sniffableUnknown) return { ...attachment, status: "보류", failureReason: "지원하지 않는 파일 형식입니다. ZIP·PDF·HWP·HWPX·DOCX·XLSX·XLSB·XLSM·PPTX 또는 문서 시그니처가 확인되는 BAK/BIN/DAT만 처리합니다." };
   try {
     let response: Response | undefined;
     let responseUrl = attachment.sourceUrl;
@@ -192,7 +205,8 @@ export async function processAttachment(noticeId: string, attachment: Attachment
           if (declaredSize > MAX_ATTACHMENT_BYTES) return { ...attachment, status: "보류", failureReason: "파일 크기가 50MB 제한을 초과합니다." };
           const candidateBytes = Buffer.from(await response.arrayBuffer());
           if (candidateBytes.length > MAX_ATTACHMENT_BYTES) return { ...attachment, status: "보류", failureReason: "파일 크기가 50MB 제한을 초과합니다." };
-          if (!looksLikeDocument(candidateBytes, extension)) {
+          const detectedExtension = sniffExtension(candidateBytes, extension);
+          if (!looksLikeDocument(candidateBytes, sniffableUnknown ? detectedExtension : extension) || (sniffableUnknown && detectedExtension === extension)) {
             lastDownloadError = new Error(`${extension.toUpperCase()}이 아닌 응답(${candidateBytes.subarray(0, 8).toString("hex")})`);
             break;
           }
@@ -208,7 +222,11 @@ export async function processAttachment(noticeId: string, attachment: Attachment
       if (bytes) break;
     }
     if (!response || !bytes) throw lastDownloadError instanceof Error ? lastDownloadError : new Error("첨부파일 다운로드 응답이 없습니다.");
-    const extracted = extension === "zip" ? await extractZipText(bytes) : await extractBytesText(bytes, extension);
+    const effectiveExtension = sniffExtension(bytes, extension);
+    let extracted = effectiveExtension === "zip" ? await extractZipText(bytes) : await extractBytesText(bytes, effectiveExtension);
+    // CFB containers are used by both legacy HWP and XLS. If a sniffed backup
+    // is not readable as HWP, make the non-AI XLS parser the second attempt.
+    if (!extracted.text.trim() && sniffableUnknown && effectiveExtension === "hwp") extracted = await extractBytesText(bytes, "xls");
     const text = extracted.text;
     const pages = extracted.pages;
     if (!text.trim()) return { ...attachment, status: "부분 분석", pages, failureReason: extension === "pdf" && process.env.OCR_ENABLED !== "true" ? "텍스트 레이어가 없는 PDF입니다. GitHub Actions OCR 재처리 대기" : `${extension.toUpperCase()} 텍스트를 추출하지 못했습니다. 원문 확인이 필요합니다.` };
