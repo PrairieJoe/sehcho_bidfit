@@ -1,4 +1,4 @@
-import { enqueuePendingAttachmentJobs, finishActiveBatchIfDrained, processPendingAttachmentJobsInline, requeueTraditionalOcrCandidates } from "@/lib/attachment-pass";
+import { enqueuePendingAttachmentJobs, finishActiveBatchIfDrained, processPendingAttachmentJobsInline, requeueAttachmentsMissingText, requeueTraditionalOcrCandidates } from "@/lib/attachment-pass";
 import { runCollectionPass } from "@/lib/collection-pass";
 import { enqueueReadyNoticeAiJobs, processPendingNoticeAiJobsInline } from "@/lib/notice-ai-pass";
 import { ensureDefaultTopic } from "@/lib/repository";
@@ -126,6 +126,7 @@ export async function runDailyBatch() {
     // the work. Publish the whole current queue so durable consumers can keep
     // processing independently of the browser tab.
     const queue = await enqueuePendingAttachmentJobs(5_000);
+    const missingTextRequeued = await requeueAttachmentsMissingText(collection.noticeIds);
     const carriedScores = await carryForwardUnchangedScores(admin, collection.noticeIds, String(started.id));
     // Scope registration to this collection. Scanning the whole notice table
     // can consume the web request budget and leave current no-attachment
@@ -135,7 +136,7 @@ export async function runDailyBatch() {
     // registration. Attachment extraction and Gemini calls continue through
     // /api/runs/continue, avoiding a long initial request that can prevent the
     // admin page from starting its continuation loop.
-    const result = { ...collection, ...queue, ...aiQueue, carriedScores, inlineProcessed: 0, inlineAiProcessed: 0, analyzed: carriedScores };
+    const result = { ...collection, ...queue, ...aiQueue, missingTextRequeued, carriedScores, inlineProcessed: 0, inlineAiProcessed: 0, analyzed: carriedScores };
     const { error: finishError } = await admin.from("batch_runs").update({
       // Queue registration is not analysis completion. The worker/continuation
       // must verify one Gemini score per collected notice before closing it.
@@ -170,6 +171,7 @@ export async function runGithubActionsBatch() {
     // becomes ready; rescanning every notice on every cycle caused a large
     // Supabase round-trip bottleneck.
     await enqueueReadyNoticeAiJobs({ publish: false, noticeIds: collection.noticeIds });
+    const missingTextRequeued = await requeueAttachmentsMissingText(collection.noticeIds);
     const ocrRequeued = await requeueTraditionalOcrCandidates(collection.noticeIds);
     if (ocrRequeued) console.log(`[Batch] traditional OCR candidates requeued=${ocrRequeued}`);
     const carriedScores = await carryForwardUnchangedScores(admin, collection.noticeIds, String(started.id));
@@ -229,7 +231,7 @@ export async function runGithubActionsBatch() {
     const errorSummary = complete ? null : `Gemini 분석 ${geminiAnalyzed}/${collection.discovered}건; 미완료 첨부 공고 ${diagnostics.attachmentNotReady}건·첨부 준비 후 Gemini 미실행 ${diagnostics.attachmentReadyWithoutGemini}건·첨부 없음 Gemini 미실행 ${diagnostics.noAttachmentWithoutGemini}건·quota 실패 ${diagnostics.quotaFailures}건·실패 첨부 ${failedAttachments}건·실패 AI ${failedAi}건; 첨부 상태 ${top(diagnostics.attachmentStatusSets)}; 첨부 사유 ${top(diagnostics.attachmentFailureReasons)}; AI 실패 사유 ${top(diagnostics.aiFailureReasons)}`;
     await admin.from("batch_runs").update({ status: complete ? "완료" : "부분 완료", completed_at: new Date().toISOString(), discovered: collection.discovered, changed: collection.changed, analyzed, api_calls: collection.queryCount, window_start: collection.windowStart, window_end: collection.windowEnd, window_hours: collection.windowHours, error_summary: errorSummary }).eq("id", started.id);
     console.log(`[Batch] diagnostics ${JSON.stringify(diagnostics)}`);
-    return { ...collection, attachmentProcessed, aiProcessed, carriedScores, analyzed, complete, drained, diagnostics };
+    return { ...collection, attachmentProcessed, aiProcessed, missingTextRequeued, carriedScores, analyzed, complete, drained, diagnostics };
   } catch (error) {
     await admin.from("batch_runs").update({ status: "부분 완료", completed_at: new Date().toISOString(), error_summary: error instanceof Error ? error.message : "작업자 실행 실패" }).eq("id", started.id);
     throw error;

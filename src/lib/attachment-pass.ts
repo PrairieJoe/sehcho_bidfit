@@ -12,6 +12,34 @@ export type AttachmentQueueMessage = { jobId: string };
 // always be consumed by the current Production route after a deployment.
 const attachmentQueue = new QueueClient({ deploymentId: null });
 
+/** Re-extract attachments whose text was purged after an earlier AI pass. */
+export async function requeueAttachmentsMissingText(noticeIds: string[]) {
+  if (!noticeIds.length) return 0;
+  const admin = createSupabaseAdminClient();
+  const ids: string[] = [];
+  for (let index = 0; index < noticeIds.length; index += 100) {
+    const { data, error } = await admin
+      .from("attachments")
+      .select("id,status,attachment_texts(extracted_text)")
+      .in("notice_id", noticeIds.slice(index, index + 100));
+    if (error) throw error;
+    for (const attachment of data ?? []) {
+      const text = Array.isArray((attachment as Row).attachment_texts)
+        ? (attachment as Row).attachment_texts[0]?.extracted_text
+        : ((attachment as Row).attachment_texts as Row | undefined)?.extracted_text;
+      if (String((attachment as Row).status) === "분석 완료" && !String(text ?? "").trim()) ids.push(String((attachment as Row).id));
+    }
+  }
+  for (let index = 0; index < ids.length; index += 100) {
+    const part = ids.slice(index, index + 100);
+    const { error: attachmentError } = await admin.from("attachments").update({ status: "대기", failure_reason: null, updated_at: new Date().toISOString() }).in("id", part);
+    if (attachmentError) throw attachmentError;
+    const { error: jobError } = await admin.from("processing_jobs").update({ status: "대기", failure_reason: null, updated_at: new Date().toISOString() }).in("attachment_id", part).in("status", ["완료", "실패"]);
+    if (jobError) throw jobError;
+  }
+  return ids.length;
+}
+
 /** Reclaim only scan-PDF results that Vercel could not OCR. */
 export async function requeueTraditionalOcrCandidates(noticeIds: string[]) {
   if (process.env.OCR_ENABLED !== "true" || !noticeIds.length) return 0;
