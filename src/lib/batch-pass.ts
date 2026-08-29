@@ -38,7 +38,7 @@ export async function currentBatchDiagnostics(admin: any, noticeIds: string[], b
     const { data, error } = await admin.from("notices").select("id,attachments(status,failure_reason),topic_scores(analysis)").in("id", ids);
     if (error) throw error;
     for (const notice of data ?? []) {
-      const attachments = Array.isArray(notice.attachments) ? notice.attachments : [];
+    const attachments = Array.isArray(notice.attachments) ? notice.attachments : [];
       const analyses = Array.isArray(notice.topic_scores) ? notice.topic_scores.map((row: any) => row.analysis as Record<string, unknown> | null) : [];
       const analyzed = analyses.some((analysis: Record<string, unknown> | null) => isGeminiAnalysis(analysis) && String(analysis?.batchId ?? "") === batchId);
       if (analyzed) {
@@ -52,8 +52,11 @@ export async function currentBatchDiagnostics(admin: any, noticeIds: string[], b
         result.attachmentStatusSets[statusSet] = (result.attachmentStatusSets[statusSet] ?? 0) + 1;
         for (const attachment of attachments) {
           if (String(attachment.status) === "분석 완료") continue;
-          const reason = String(attachment.failure_reason ?? "사유 미기록");
-          result.attachmentFailureReasons[reason] = (result.attachmentFailureReasons[reason] ?? 0) + 1;
+        const reason = String(attachment.failure_reason ?? "사유 미기록");
+        const name = String(attachment.name ?? "").toLowerCase();
+        const extension = name.includes(".") ? name.split(".").pop() : "unknown";
+        const diagnosticReason = `${extension}: ${reason}`;
+        result.attachmentFailureReasons[diagnosticReason] = (result.attachmentFailureReasons[diagnosticReason] ?? 0) + 1;
         }
       }
     }

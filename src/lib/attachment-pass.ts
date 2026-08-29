@@ -25,12 +25,16 @@ export async function requeueTraditionalOcrCandidates(noticeIds: string[]) {
       const name = String(attachment?.name ?? "").toLowerCase();
       const reason = String(attachment?.failure_reason ?? "");
       const attempts = Number((row as Row).attempts ?? 0);
-      if (attempts >= 5) continue;
+      // Older runs exhausted the original five-attempt ceiling before the
+      // HWPX/Office parsers and OCR fallback were improved. Allow a bounded
+      // second recovery window for those same supported files.
+      if (attempts >= 10) continue;
       const scanPdf = name.endsWith(".pdf") && String(attachment?.status ?? "") === "부분 분석" && /텍스트 레이어가 없는 PDF|텍스트를 추출하지 못했습니다/.test(reason);
       const newlySupportedOffice = /\.(docx|xlsx|pptx)$/.test(name) && String(attachment?.status ?? "") === "보류" && /PDF·HWP·HWPX만 현재 처리합니다|지원하지 않는 파일 형식/.test(reason);
+      const legacySupportedExtraction = /\.(pdf|hwpx|hwp|docx|xlsx|pptx)$/.test(name) && /텍스트를 추출하지 못했습니다/.test(reason);
       const hwpBundleFailure = name.endsWith(".hwp") && /Cannot find module ['\"]cfb['\"]/.test(reason);
       const transientFailure = /operation was aborted due to timeout|Command failed: (tesseract|pdftoppm)/i.test(reason);
-      if (scanPdf || newlySupportedOffice || hwpBundleFailure || transientFailure) ids.push(String((row as Row).id));
+      if (scanPdf || newlySupportedOffice || legacySupportedExtraction || hwpBundleFailure || transientFailure) ids.push(String((row as Row).id));
     }
   }
   for (let index = 0; index < ids.length; index += 100) {
