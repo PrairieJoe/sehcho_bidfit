@@ -125,12 +125,14 @@ export async function runDailyBatch() {
     const inlineAiProcessed = await processPendingNoticeAiJobsInline(8, undefined, undefined, false, String(started.id));
     const result = { ...collection, ...queue, ...aiQueue, inlineProcessed, inlineAiProcessed, analyzed: inlineAiProcessed };
     const { error: finishError } = await admin.from("batch_runs").update({
-      status: queue.attachmentQueued || aiQueue.aiQueued ? "분석 중" : "완료", completed_at: queue.attachmentQueued || aiQueue.aiQueued ? null : new Date().toISOString(), discovered: result.discovered,
+      // Queue registration is not analysis completion. The worker/continuation
+      // must verify one Gemini score per collected notice before closing it.
+      status: result.discovered ? "분석 중" : "완료", completed_at: result.discovered ? null : new Date().toISOString(), discovered: result.discovered,
       changed: result.changed, analyzed: result.analyzed, api_calls: result.queryCount,
-      error_summary: queue.attachmentQueued || aiQueue.aiQueued ? `첨부문서 ${queue.attachmentQueued}건, 공고 AI 분석 ${aiQueue.aiQueued}건을 대기열에 등록했습니다.` : null,
+      error_summary: result.discovered ? `첨부문서 ${queue.attachmentQueued}건, 공고 AI 분석 ${aiQueue.aiQueued}건을 대기열에 등록했습니다. 점수 확인 전까지 분석 중으로 유지합니다.` : null,
     }).eq("id", started.id);
     if (finishError) throw finishError;
-    return result;
+    return { ...result, batchId: String(started.id), noticeIds: collection.noticeIds };
   } catch (error) {
     await admin.from("batch_runs").update({ completed_at: new Date().toISOString(), status: "부분 완료", error_summary: error instanceof Error ? error.message : "알 수 없는 오류" }).eq("id", started.id);
     throw error;
