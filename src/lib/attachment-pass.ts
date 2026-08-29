@@ -187,5 +187,22 @@ export async function finishActiveBatchIfDrained() {
   const { data: scores } = await admin.from("topic_scores").select("notice_id,analysis").gte("updated_at", active.started_at);
   const analyzed = new Set((scores ?? []).filter((row: any) => String(row.analysis?.batchId ?? "") === String(active.id) && String(row.analysis?.aiModel ?? "").toLowerCase().startsWith("gemini")).map((row: any) => String(row.notice_id))).size;
   const complete = Number(active.discovered ?? 0) > 0 && analyzed === Number(active.discovered);
-  await admin.from("batch_runs").update({ status: complete ? "완료" : "부분 완료", completed_at: new Date().toISOString(), analyzed, error_summary: complete ? null : `Gemini 분석 ${analyzed}/${Number(active.discovered ?? 0)}건` }).eq("id", active.id);
+  let errorSummary: string | null = null;
+  if (!complete) {
+    const { data: notices } = await admin.from("notices").select("attachments(status,failure_reason)").gte("updated_at", active.started_at);
+    const statusCounts: Record<string, number> = {};
+    const reasonCounts: Record<string, number> = {};
+    for (const notice of notices ?? []) {
+      for (const attachment of (notice as Row).attachments ?? []) {
+        const status = String(attachment.status ?? "사유 미기록");
+        if (status === "분석 완료") continue;
+        statusCounts[status] = (statusCounts[status] ?? 0) + 1;
+        const reason = String(attachment.failure_reason ?? "사유 미기록");
+        reasonCounts[reason] = (reasonCounts[reason] ?? 0) + 1;
+      }
+    }
+    const top = (values: Record<string, number>) => Object.entries(values).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([reason, count]) => `${reason}(${count})`).join("·") || "없음";
+    errorSummary = `Gemini 분석 ${analyzed}/${Number(active.discovered ?? 0)}건; 첨부 상태 ${top(statusCounts)}; 첨부 사유 ${top(reasonCounts)}`;
+  }
+  await admin.from("batch_runs").update({ status: complete ? "완료" : "부분 완료", completed_at: new Date().toISOString(), analyzed, error_summary: errorSummary }).eq("id", active.id);
 }
