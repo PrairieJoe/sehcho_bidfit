@@ -12,6 +12,16 @@ export type AttachmentQueueMessage = { jobId: string };
 // always be consumed by the current Production route after a deployment.
 const attachmentQueue = new QueueClient({ deploymentId: null });
 
+function sanitizeExtractedText(value: string) {
+  // PostgreSQL text and JSON transport reject NULs, control characters and
+  // unpaired UTF-16 surrogates that can appear in malformed PDF text output.
+  return value
+    .replace(/\u0000/g, "")
+    .replace(/[\u0001-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "")
+    .replace(/[\uD800-\uDFFF]/g, "")
+    .trim();
+}
+
 /** Re-extract attachments whose text was purged after an earlier AI pass. */
 export async function requeueAttachmentsMissingText(noticeIds: string[]) {
   if (!noticeIds.length) return 0;
@@ -189,7 +199,7 @@ export async function processQueuedAttachmentJob(jobId: string, options: { publi
     });
     // HWP extraction can contain NUL bytes. PostgreSQL text rejects them with
     // 22P05, which otherwise strands the processing job in "처리 중" forever.
-    const extractedText = processed.extractedText?.replace(/\u0000/g, "");
+    const extractedText = processed.extractedText ? sanitizeExtractedText(processed.extractedText) : undefined;
     // Persist the text before declaring the attachment ready. A text-write
     // failure must not make the Gemini readiness gate see a false success.
     if (extractedText) {
