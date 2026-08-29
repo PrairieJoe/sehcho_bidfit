@@ -171,6 +171,27 @@ export async function processPendingNoticeAiJobsInline(limit = 32, createdSince?
         if (updateError) throw updateError;
       }
     }
+    // Retry transient provider failures (for example Gemini HTTP 503 high
+    // demand) on the next continuation. Quota failures are deliberately left
+    // terminal so a free-tier limit cannot turn into an unbounded retry loop.
+    for (let index = 0; index < noticeIds.length; index += 100) {
+      const { data: failed, error: failedError } = await admin
+        .from("notice_ai_jobs")
+        .select("id,failure_reason")
+        .eq("status", "실패")
+        .in("notice_id", noticeIds.slice(index, index + 100));
+      if (failedError) throw failedError;
+      const retryIds = (failed ?? [])
+        .filter((row: Row) => !String(row.failure_reason ?? "").toLowerCase().includes("quota"))
+        .map((row: Row) => String(row.id));
+      if (retryIds.length) {
+        const { error: retryError } = await admin
+          .from("notice_ai_jobs")
+          .update({ status: "대기", failure_reason: null, updated_at: new Date().toISOString() })
+          .in("id", retryIds);
+        if (retryError) throw retryError;
+      }
+    }
   }
   let data: Row[] = [];
   if (noticeIds?.length) {
