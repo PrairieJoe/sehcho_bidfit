@@ -27,7 +27,7 @@ async function extractOfficeText(bytes: Buffer, extension: string) {
 }
 
 function extractLegacyXlsText(bytes: Buffer) {
-  const workbook = CFB.parse(bytes, { type: "buffer" });
+  const workbook = CFB.read(bytes, { type: "buffer" });
   const streams = (workbook.FileIndex ?? []).filter((entry: any) => entry.type === 2 && /^(Workbook|Book)$/i.test(String(entry.name)));
   const chunks: string[] = [];
   for (const stream of streams) {
